@@ -1,0 +1,15 @@
+[build-system]
+requires = ["setuptools>=70"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "embodied-systems-architecture-workbench"
+version = "0.1.0"
+requires-python = ">=3.11"
+description = "Headless reference architecture for governed embodied missions"
+
+[project.optional-dependencies]
+dev = ["ruff==0.12.11"]
+
+[tool.setuptools.packages.find]
+where = ["src"]

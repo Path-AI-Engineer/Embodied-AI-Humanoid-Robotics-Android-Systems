@@ -1,0 +1,10 @@
+string schema_version
+string mission_id
+string frame_id
+string clock_domain
+builtin_interfaces/Time finished_at
+string outcome
+string reason
+string profile_sha256
+string events_sha256
+string[] artifact_sha256

@@ -1,0 +1,9 @@
+string schema_version
+string mode
+string frame_id
+string clock_domain
+builtin_interfaces/Time observed_at
+bool estop_latched
+float32 sensor_age_seconds
+float32 human_distance_meters
+string reason

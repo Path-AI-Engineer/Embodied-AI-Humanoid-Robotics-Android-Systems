@@ -1,0 +1,11 @@
+{
+  "approval": false,
+  "fault": "bumper",
+  "restricted_zone": false,
+  "scenario_id": "mission-040",
+  "seed": 6104,
+  "station_id": "inspection-station",
+  "target_id": "object-00",
+  "target_x_m": 2.0,
+  "target_y_m": 0.5
+}

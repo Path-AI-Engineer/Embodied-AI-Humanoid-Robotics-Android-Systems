@@ -1,0 +1,27 @@
+{
+  "schema_version": "embodied.robotics-profile.v1",
+  "status": "headless-bringup-verified; full-integration-pending",
+  "architecture": "linux/amd64",
+  "operating_system": "Ubuntu 26.04.1 LTS Resolute Raccoon",
+  "ros_distro": "lyrical",
+  "gazebo_distribution": "jetty",
+  "base_image": "ros:lyrical-ros-base-resolute",
+  "base_image_digest": "sha256:0c19f326a339ed770ef1d4c0646a8b53bdb49dd5ff74b6de41ebdb8ac21e1806",
+  "ros_packages": {
+    "ros-lyrical-builtin-interfaces": "2.4.5-1resolute.20260915.031157",
+    "ros-lyrical-std-msgs": "5.9.3-1resolute.20260915.043001",
+    "ros-lyrical-geometry-msgs": "5.9.3-1resolute.20260915.045122",
+    "ros-lyrical-ros-gz-bridge": "3.0.10-1resolute.20260915.142616",
+    "ros-lyrical-ros2-control": "6.10.1-1resolute.20260915.111302",
+    "ros-lyrical-behaviortree-cpp": "4.10.0-1resolute.20260915.080455"
+  },
+  "available_not_integrated": {
+    "ros-lyrical-moveit": "2.15.2-1resolute.20260918.030626"
+  },
+  "package_resolution": "Current Lyrical repository cohort as checked on 2026-09-25; recheck before release",
+  "checked_at_utc": "2026-09-25",
+  "profile_change_policy": "ADR plus clean conformance rerun",
+  "simulation_clock": "sim",
+  "hard_real_time_claim": false,
+  "certified_safety_claim": false
+}

@@ -1,0 +1,11 @@
+{
+  "approval": false,
+  "fault": "stale_tf",
+  "restricted_zone": false,
+  "scenario_id": "mission-026",
+  "seed": 6102,
+  "station_id": "inspection-station",
+  "target_id": "object-02",
+  "target_x_m": 2.0,
+  "target_y_m": 0.6
+}

@@ -1,0 +1,11 @@
+{
+  "approval": false,
+  "fault": "frame_mismatch",
+  "restricted_zone": false,
+  "scenario_id": "mission-084",
+  "seed": 6100,
+  "station_id": "inspection-station",
+  "target_id": "object-04",
+  "target_x_m": 1.0,
+  "target_y_m": 0.9
+}

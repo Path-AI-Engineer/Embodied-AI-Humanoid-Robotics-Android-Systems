@@ -1,0 +1,16 @@
+string schema_version
+string mission_id
+string skill_name
+string target_id
+string frame_id
+string clock_domain
+builtin_interfaces/Time requested_at
+float32 timeout_seconds
+---
+bool completed
+string result_code
+string reason
+---
+string skill_name
+float32 progress_ratio
+string result_code

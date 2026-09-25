@@ -1,0 +1,9 @@
+string schema_version
+string mission_id
+string frame_id
+string clock_domain
+builtin_interfaces/Time decided_at
+bool allowed
+string result_code
+string reason
+string human_approval_ref

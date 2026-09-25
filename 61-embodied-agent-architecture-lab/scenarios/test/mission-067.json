@@ -1,0 +1,11 @@
+{
+  "approval": false,
+  "fault": "stale_percept",
+  "restricted_zone": false,
+  "scenario_id": "mission-067",
+  "seed": 6107,
+  "station_id": "inspection-station",
+  "target_id": "object-03",
+  "target_x_m": 1.8,
+  "target_y_m": 0.7
+}

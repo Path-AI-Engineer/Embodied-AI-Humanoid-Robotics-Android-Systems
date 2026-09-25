@@ -1,0 +1,11 @@
+string schema_version
+string mission_id
+string target_id
+string station_id
+string requested_by
+string frame_id
+string clock_domain
+builtin_interfaces/Time requested_at
+float32 ttl_seconds
+bool approved_restricted_zone
+bool approved_manipulation

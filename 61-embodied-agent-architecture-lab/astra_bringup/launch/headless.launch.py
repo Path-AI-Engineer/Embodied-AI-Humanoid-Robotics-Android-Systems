@@ -1,0 +1,25 @@
+"""Headless Gazebo bringup. Motor command bridging is intentionally absent."""
+
+from pathlib import Path
+
+from ament_index_python.packages import get_package_share_directory
+from launch import LaunchDescription
+from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.launch_description_sources import PythonLaunchDescriptionSource
+from launch_ros.actions import Node
+
+
+def generate_launch_description():
+    sim_share = Path(get_package_share_directory("astra_simulation"))
+    description_share = Path(get_package_share_directory("astra_description"))
+    bringup_share = Path(get_package_share_directory("astra_bringup"))
+    gz_share = Path(get_package_share_directory("ros_gz_sim"))
+    world = sim_share / "worlds" / "embodied_lab.sdf"
+    model = description_share / "urdf" / "astra.urdf.xacro"
+    robot_xml = __import__("subprocess").check_output(["xacro", str(model)], text=True)
+    return LaunchDescription([
+        IncludeLaunchDescription(PythonLaunchDescriptionSource(str(gz_share / "launch" / "gz_sim.launch.py")), launch_arguments={"gz_args": f"-r -s {world}"}.items()),
+        Node(package="robot_state_publisher", executable="robot_state_publisher", namespace="astra", parameters=[{"robot_description": robot_xml, "use_sim_time": True}]),
+        Node(package="ros_gz_bridge", executable="parameter_bridge", name="sensor_bridge", parameters=[{"config_file": str(bringup_share / "config" / "bridge.yaml"), "use_sim_time": True}]),
+        ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen"),
+    ])

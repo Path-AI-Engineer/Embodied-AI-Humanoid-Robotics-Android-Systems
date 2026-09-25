@@ -1,0 +1,11 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>astra_description</name>
+  <version>0.1.0</version>
+  <description>Synthetic Astra model; not a commercial robot specification.</description>
+  <maintainer email="maintainers@example.invalid">Project 61 maintainers</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <exec_depend>xacro</exec_depend>
+  <exec_depend>robot_state_publisher</exec_depend>
+</package>

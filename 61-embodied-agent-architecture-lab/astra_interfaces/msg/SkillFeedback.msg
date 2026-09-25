@@ -1,0 +1,9 @@
+string schema_version
+string mission_id
+string skill_name
+string frame_id
+string clock_domain
+builtin_interfaces/Time observed_at
+float32 progress_ratio
+string result_code
+string reason

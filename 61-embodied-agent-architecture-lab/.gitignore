@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.egg-info/
+.venv/
+.pytest_cache/
+reports/local/
+apps/workbench/node_modules/
+apps/workbench/dist/
+apps/workbench/.next/
+apps/workbench/test-results/
+apps/workbench/playwright-report/
+apps/workbench/tsconfig.tsbuildinfo
+apps/workbench/AGENTS.md
+apps/workbench/CLAUDE.md

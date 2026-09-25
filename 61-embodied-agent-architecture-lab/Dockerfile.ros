@@ -1,0 +1,25 @@
+FROM ros:lyrical-ros-base-resolute@sha256:0c19f326a339ed770ef1d4c0646a8b53bdb49dd5ff74b6de41ebdb8ac21e1806
+
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    python3-colcon-common-extensions \
+    ros-lyrical-rosidl-default-generators \
+    ros-lyrical-std-msgs \
+    ros-lyrical-geometry-msgs \
+    ros-lyrical-xacro \
+    ros-lyrical-robot-state-publisher \
+    ros-lyrical-ros-gz-sim \
+    ros-lyrical-ros-gz-bridge \
+    ros-lyrical-ros2-control \
+    ros-lyrical-behaviortree-cpp \
+    && rm -rf /var/lib/apt/lists/*
+RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /ws
+COPY astra_interfaces /ws/src/astra_interfaces
+COPY astra_description /ws/src/astra_description
+COPY astra_bringup /ws/src/astra_bringup
+COPY astra_simulation /ws/src/astra_simulation
+RUN bash -lc '. /opt/ros/lyrical/setup.bash && colcon build --merge-install --event-handlers console_direct+'
+ENV AMENT_PREFIX_PATH=/ws/install:/opt/ros/lyrical
+CMD ["bash", "-lc", ". /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && ros2 launch astra_bringup headless.launch.py"]

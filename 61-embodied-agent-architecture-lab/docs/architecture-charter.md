@@ -1,0 +1,27 @@
+# Project 61 architecture charter
+
+Status: implementation candidate, not approved release. The synthetic Astra mission is inspect–point–report–return. Hardware motion and claims of certified safety or hard real-time execution are out of scope.
+
+## Ownership and trust
+
+| Boundary | Owner | Contract |
+| --- | --- | --- |
+| Sensor fixture to perception | `astra_simulation` → perception adapter | Source timestamp, frame, covariance, confidence and TTL are mandatory. |
+| Perception to working state | World model | Facts retain provenance and expire; simulator ground truth is unavailable to the agent. |
+| Goal to execution | Goal gateway → executive | Invalid or restricted goals fail closed before skill dispatch. |
+| Skill to movement | Skill registry → control gateway | Allowlisted name, fresh target belief, bounded command and deadline. |
+| Movement to simulator | Safety supervisor → bound control gateway | Independent authorization; E-stop latches and needs operator recovery plus self-check. |
+| Runtime to evidence | Evidence writer | Every terminal run has a canonical checksum, outcome, reason and event sequence. |
+
+The Python harness enforces these boundaries within a cooperative process. It is not isolation against malicious code running in that process. The ROS graph and hardware path require separate security and safety validation.
+
+## Pre-registered acceptance
+
+- All 11 interface catalog entries define owner, endpoint, frame, units, freshness, deadline, QoS and result codes.
+- All 64 development fixtures terminate with verifiable evidence; 32 test fixtures remain held out until profile, robot, policy, and scoring are frozen.
+- No motor commit occurs without the bound gateway and a positive safety decision. Bypass attempts and speed, age, contact, human-proximity, heartbeat, transform, localization and queue faults must be rejected or stopped.
+- Clock-domain and frame mismatches are explicit errors, never silent conversion.
+- The ROS/Gazebo image must compile all workspace packages, expand Astra Xacro, validate the world, and complete headless spawn without crashed processes.
+- The production workbench must load local evidence and pass desktop/mobile keyboard and overflow checks.
+
+The profile is Lyrical/Jetty only. If its clean runtime cannot pass, document the exact blocker in an ADR before considering the permitted Jazzy/Harmonic fallback. The frozen test split, ROS lifecycle/fault campaign, rosbag2/SROS2, MoveIt and BehaviorTree.CPP integration, and cross-repository contract approval remain distinct closure gates; a passing portable gate does not waive them.

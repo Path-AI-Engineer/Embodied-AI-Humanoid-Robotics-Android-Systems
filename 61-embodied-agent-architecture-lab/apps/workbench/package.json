@@ -1,0 +1,27 @@
+{
+  "name": "embodied-systems-architecture-workbench",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --webpack -p 8162",
+    "build": "next build --webpack",
+    "start": "next start -p 8162",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint . --max-warnings=0",
+    "test:e2e": "playwright test"
+  },
+  "dependencies": {
+    "next": "16.3.5",
+    "react": "19.2.4",
+    "react-dom": "19.2.4"
+  },
+  "devDependencies": {
+    "@playwright/test": "1.62.1",
+    "@types/node": "24.3.0",
+    "@types/react": "19.1.12",
+    "@types/react-dom": "19.1.9",
+    "eslint": "9.39.1",
+    "eslint-config-next": "16.3.5",
+    "typescript": "5.9.3"
+  }
+}

@@ -1,0 +1,17 @@
+<?xml version="1.0"?>
+<sdf version="1.9">
+  <world name="embodied_lab_v1">
+    <physics name="deterministic" type="ignored"><max_step_size>0.005</max_step_size><real_time_factor>1.0</real_time_factor></physics>
+    <plugin filename="gz-sim-physics-system" name="gz::sim::systems::Physics"/>
+    <plugin filename="gz-sim-user-commands-system" name="gz::sim::systems::UserCommands"/>
+    <plugin filename="gz-sim-scene-broadcaster-system" name="gz::sim::systems::SceneBroadcaster"/>
+    <plugin filename="gz-sim-sensors-system" name="gz::sim::systems::Sensors"/>
+    <light name="overhead" type="directional"><pose>0 0 5 0 0 0</pose><diffuse>0.9 0.9 0.9 1</diffuse><specular>0.1 0.1 0.1 1</specular><direction>-0.3 -0.1 -1</direction></light>
+    <model name="floor"><static>true</static><link name="floor"><collision name="collision"><geometry><box><size>10 6 0.1</size></box></geometry></collision><visual name="visual"><geometry><box><size>10 6 0.1</size></box></geometry></visual></link></model>
+    <model name="inspection_station"><static>true</static><pose>3 1.8 0.4 0 0 0</pose><link name="body"><collision name="collision"><geometry><box><size>0.8 0.8 0.8</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.8 0.8 0.8</size></box></geometry></visual></link></model>
+    <model name="object_table"><static>true</static><pose>-3 -1.8 0.4 0 0 0</pose><link name="body"><collision name="collision"><geometry><box><size>1.0 0.8 0.8</size></box></geometry></collision><visual name="visual"><geometry><box><size>1.0 0.8 0.8</size></box></geometry></visual></link></model>
+    <model name="restricted_zone_marker"><static>true</static><pose>1 -2 0.01 0 0 0</pose><link name="visual_only"><visual name="visual"><geometry><box><size>2 1 0.02</size></box></geometry><material><ambient>1 0 0 0.5</ambient></material></visual></link></model>
+    <model name="room_divider_north"><static>true</static><pose>0 1.5 0.5 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>0.2 2 1</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2 2 1</size></box></geometry></visual></link></model>
+    <model name="room_divider_south"><static>true</static><pose>0 -1.5 0.5 0 0 0</pose><link name="wall"><collision name="collision"><geometry><box><size>0.2 2 1</size></box></geometry></collision><visual name="visual"><geometry><box><size>0.2 2 1</size></box></geometry></visual></link></model>
+  </world>
+</sdf>

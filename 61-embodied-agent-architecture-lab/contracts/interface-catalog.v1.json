@@ -1,0 +1,18 @@
+{
+  "schema_version": "embodied.interface-catalog.v1",
+  "clock_domain": "sim",
+  "compatibility": "v1alpha1 additive fields only; breaking changes require v2 namespace",
+  "interfaces": [
+    {"name": "Percept", "owner": "embodied_perception", "topic": "/astra/perception/percepts", "frame": "map", "units": "m, m2, s", "freshness_ms": 250, "deadline_ms": 250, "qos": {"reliability": "best_effort", "durability": "volatile", "depth": 8}, "result_codes": ["OK", "STALE", "FRAME_MISMATCH", "CLOCK_MISMATCH", "LOW_CONFIDENCE"]},
+    {"name": "EntityState", "owner": "embodied_world_model", "topic": "/astra/world/entities", "frame": "map", "units": "m, m2, s", "freshness_ms": 500, "deadline_ms": 500, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 8}, "result_codes": ["OK", "STALE"]},
+    {"name": "WorldDelta", "owner": "embodied_world_model", "topic": "/astra/world/delta", "frame": "map", "units": "m, s", "freshness_ms": 500, "deadline_ms": 500, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 8}, "result_codes": ["OK", "STALE"]},
+    {"name": "GoalRequest", "owner": "embodied_executive", "topic": "/astra/goals/request", "frame": "map", "units": "s", "freshness_ms": 1000, "deadline_ms": 1000, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 4}, "result_codes": ["OK", "POLICY_DENIED", "APPROVAL_REQUIRED"]},
+    {"name": "PolicyDecision", "owner": "embodied_executive", "topic": "/astra/goals/decision", "frame": "map", "units": "s", "freshness_ms": 1000, "deadline_ms": 1000, "qos": {"reliability": "reliable", "durability": "transient_local", "depth": 4}, "result_codes": ["OK", "POLICY_DENIED", "APPROVAL_REQUIRED"]},
+    {"name": "SkillDescriptor", "owner": "embodied_skills", "topic": "/astra/skills/catalog", "frame": "base_link", "units": "s", "freshness_ms": 5000, "deadline_ms": 5000, "qos": {"reliability": "reliable", "durability": "transient_local", "depth": 4}, "result_codes": ["OK", "UNKNOWN_SKILL"]},
+    {"name": "SkillInvocation", "owner": "embodied_skills", "action": "/astra/skills/invoke", "frame": "map", "units": "m, s", "freshness_ms": 250, "deadline_ms": 2000, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 4}, "cancellation": "cancel request halts via control gateway; timed-out action enters safe stop", "result_codes": ["OK", "STALE", "SAFETY_STOP", "DEADLINE_MISSED"]},
+    {"name": "SkillFeedback", "owner": "embodied_skills", "topic": "/astra/skills/feedback", "frame": "map", "units": "s", "freshness_ms": 250, "deadline_ms": 250, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 8}, "result_codes": ["OK", "SAFETY_STOP"]},
+    {"name": "SafetyState", "owner": "embodied_safety", "topic": "/astra/safety/state", "frame": "base_link", "units": "s", "freshness_ms": 100, "deadline_ms": 100, "qos": {"reliability": "reliable", "durability": "transient_local", "depth": 1}, "result_codes": ["OK", "SAFETY_STOP", "E_STOP_LATCHED"]},
+    {"name": "FaultEvent", "owner": "embodied_safety", "topic": "/astra/safety/faults", "frame": "base_link", "units": "s", "freshness_ms": 100, "deadline_ms": 100, "qos": {"reliability": "reliable", "durability": "volatile", "depth": 16}, "result_codes": ["SAFETY_STOP", "E_STOP_LATCHED"]},
+    {"name": "EvidenceManifest", "owner": "embodied_evidence", "topic": "/astra/evidence/manifest", "frame": "map", "units": "s", "freshness_ms": 5000, "deadline_ms": 5000, "qos": {"reliability": "reliable", "durability": "transient_local", "depth": 4}, "result_codes": ["OK", "PRECONDITION_FAILED"]}
+  ]
+}

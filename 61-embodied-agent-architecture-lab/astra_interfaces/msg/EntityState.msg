@@ -1,0 +1,9 @@
+string schema_version
+string entity_id
+string frame_id
+string clock_domain
+builtin_interfaces/Time observed_at
+builtin_interfaces/Time valid_until
+float32 confidence
+geometry_msgs/PoseWithCovariance pose
+string provenance
