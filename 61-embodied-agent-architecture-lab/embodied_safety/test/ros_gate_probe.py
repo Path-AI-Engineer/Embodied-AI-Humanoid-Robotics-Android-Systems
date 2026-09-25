@@ -118,6 +118,8 @@ def main():
         node.until(lambda: any(s.mode == "SAFE_IDLE" for s in node.states))
         node.until(lambda: any(p.entity_id == "obstacle/front" for p in node.percepts))
         node.until(lambda: any(e.entity_id == "obstacle/front" for e in node.entities))
+        node.until(lambda: any(p.entity_id == "object-00" for p in node.percepts))
+        node.until(lambda: any(e.entity_id == "object-00" for e in node.entities))
         node.arm.publish(Bool(data=True))
         for _ in range(5):
             rclpy.spin_once(node, timeout_sec=0.05)
@@ -187,6 +189,7 @@ def main():
                 {
                     "sensor_readiness": "verified",
                     "sensor_percept_to_world": "verified",
+                    "rgbd_target_to_world": "verified",
                     "goal_policy_and_untrusted_approval_rejection": "verified",
                     "bounded_command": "verified",
                     "estop_latch": "verified",

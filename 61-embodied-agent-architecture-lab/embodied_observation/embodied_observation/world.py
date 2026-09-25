@@ -8,6 +8,15 @@ from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 
+PERCEPT_SOURCES = {
+    "obstacle/front": (
+        "astra/base_footprint/lidar_2d",
+        "/astra/sensors/scan",
+    ),
+    "object-00": ("camera_optical_frame", "/astra/sensors/rgbd/image"),
+}
+
+
 class WorldModel(LifecycleNode):
     def __init__(self):
         super().__init__("world_model")
@@ -44,11 +53,13 @@ class WorldModel(LifecycleNode):
         if (
             percept.schema_version != "astra.percept.v1"
             or percept.clock_domain != "sim"
-            or percept.frame_id != "astra/base_footprint/lidar_2d"
-            or percept.source_topic != "/astra/sensors/scan"
+            or (percept.frame_id, percept.source_topic)
+            != PERCEPT_SOURCES.get(percept.entity_id)
             or percept.result_code != "OK"
             or not 0.7 <= percept.confidence <= 1.0
             or not math.isfinite(percept.pose.pose.position.x)
+            or not math.isfinite(percept.pose.pose.position.y)
+            or not math.isfinite(percept.pose.pose.position.z)
             or not 0 < percept.ttl_seconds <= 0.25
         ):
             return
@@ -69,7 +80,7 @@ class WorldModel(LifecycleNode):
         entity.provenance = percept.source_topic
         self.facts[entity.entity_id] = entity
         self.entities.publish(entity)
-        self.publish_delta([entity.entity_id], [])
+        self.publish_delta([entity.entity_id], [], entity.frame_id, entity.provenance)
 
     def evict_stale(self):
         if not self.active:
@@ -81,20 +92,19 @@ class WorldModel(LifecycleNode):
             if entity.valid_until.sec * 10**9 + entity.valid_until.nanosec < now_ns
         ]
         for name in expired:
-            del self.facts[name]
-        if expired:
-            self.publish_delta(expired, [])
+            entity = self.facts.pop(name)
+            self.publish_delta([name], [], entity.frame_id, entity.provenance)
 
-    def publish_delta(self, changed, conflicts):
+    def publish_delta(self, changed, conflicts, frame_id, provenance):
         delta = WorldDelta()
         delta.schema_version = "astra.world-delta.v1"
-        delta.frame_id = "astra/base_footprint/lidar_2d"
+        delta.frame_id = frame_id
         delta.clock_domain = "sim"
         delta.observed_at = self.get_clock().now().to_msg()
         delta.ttl_seconds = 0.5
         delta.changed_entity_ids = changed
         delta.unresolved_conflicts = conflicts
-        delta.provenance = "/astra/sensors/scan"
+        delta.provenance = provenance
         self.deltas.publish(delta)
 
 

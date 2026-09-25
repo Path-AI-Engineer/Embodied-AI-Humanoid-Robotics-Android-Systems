@@ -1,5 +1,6 @@
 #include <algorithm>
 #include <chrono>
+#include <cstdint>
 #include <cmath>
 #include <limits>
 #include <memory>
@@ -45,10 +46,15 @@ class SafetyGateway final : public rclcpp::Node {
         "/astra/goals/decision", rclcpp::QoS(4).reliable().transient_local(),
         [this](astra_interfaces::msg::PolicyDecision::ConstSharedPtr decision) {
           const double age = (now() - rclcpp::Time(decision->decided_at)).seconds();
-          if (decision->schema_version == "astra.policy-decision.v1" &&
-              decision->frame_id == "map" && decision->clock_domain == "sim" &&
+          const auto stamp = rclcpp::Time(decision->decided_at).nanoseconds();
+          if (decision->schema_version != "astra.policy-decision.v1" ||
+              decision->frame_id != "map" || decision->clock_domain != "sim" ||
+              decision->mission_id.empty() || age < -0.05 || age > 1.0 ||
+              stamp < last_policy_stamp_ns_) return;
+          last_policy_stamp_ns_ = stamp;
+          if (
               decision->allowed && decision->result_code == "OK" &&
-              !decision->mission_id.empty() && age >= -0.05 && age <= 1.0) {
+              !decision->mission_id.empty()) {
             authorized_mission_ = decision->mission_id;
             last_policy_wall_ = std::chrono::steady_clock::now();
           } else if (decision->mission_id == authorized_mission_) {
@@ -235,6 +241,7 @@ class SafetyGateway final : public rclcpp::Node {
   std::chrono::steady_clock::time_point last_intent_wall_;
   std::chrono::steady_clock::time_point last_world_wall_;
   std::chrono::steady_clock::time_point last_policy_wall_;
+  int64_t last_policy_stamp_ns_{0};
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr command_pub_;
   rclcpp::Publisher<astra_interfaces::msg::SafetyState>::SharedPtr state_pub_;
   rclcpp::Publisher<astra_interfaces::msg::FaultEvent>::SharedPtr fault_pub_;

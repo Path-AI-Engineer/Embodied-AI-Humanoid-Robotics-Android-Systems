@@ -20,6 +20,7 @@ setup(
     entry_points={
         "console_scripts": [
             "lidar_perception = embodied_observation.perception:main",
+            "camera_perception = embodied_observation.camera:main",
             "world_model = embodied_observation.world:main",
         ]
     },

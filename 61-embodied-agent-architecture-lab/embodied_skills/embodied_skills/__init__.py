@@ -1,0 +1,1 @@
+"""Astra ROS skill boundary."""

@@ -23,7 +23,9 @@ def generate_launch_description():
         Node(package="ros_gz_bridge", executable="parameter_bridge", name="sensor_bridge", parameters=[{"config_file": str(bringup_share / "config" / "bridge.yaml"), "use_sim_time": True}]),
         Node(package="embodied_safety", executable="safety_gateway", name="safety_gateway", parameters=[{"use_sim_time": True}], output="screen"),
         LifecycleNode(package="embodied_observation", executable="lidar_perception", name="lidar_perception", namespace="", autostart=True, parameters=[{"use_sim_time": True}], output="screen"),
+        LifecycleNode(package="embodied_observation", executable="camera_perception", name="camera_perception", namespace="", autostart=True, parameters=[{"use_sim_time": True}], output="screen"),
         LifecycleNode(package="embodied_observation", executable="world_model", name="world_model", namespace="", autostart=True, parameters=[{"use_sim_time": True}], output="screen"),
         Node(package="embodied_goals", executable="goal_gateway", name="goal_gateway", parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="embodied_skills", executable="skill_server", name="skill_server", parameters=[{"use_sim_time": True}], output="screen"),
         ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen"),
     ])
