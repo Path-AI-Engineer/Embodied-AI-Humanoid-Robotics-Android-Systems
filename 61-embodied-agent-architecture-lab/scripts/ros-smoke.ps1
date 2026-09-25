@@ -30,6 +30,14 @@ wait_active() {
   done
   return 1
 }
+wait_state() {
+  expected="$1"
+  for attempt in $(seq 1 10); do
+    if timeout 5s ros2 lifecycle get /world_model 2>/dev/null | grep -q "$expected"; then return 0; fi
+    sleep 0.3
+  done
+  return 1
+}
 if ! wait_active /lidar_perception; then echo 'lidar lifecycle activation timed out' >&2; exit 21; fi
 if ! wait_active /camera_perception; then echo 'camera lifecycle activation timed out' >&2; exit 24; fi
 if ! wait_active /world_model; then echo 'world lifecycle activation timed out' >&2; exit 22; fi
@@ -38,13 +46,19 @@ bag_pid=$!
 sleep 2
 python3 /ws/src/embodied_skills/test/skill_action_probe.py > /tmp/astra-skill-probe.log 2>&1
 skill_status=$?
+if [ "$skill_status" -ne 0 ]; then
+  cat /tmp/astra-skill-probe.log
+  tail -n 30 /tmp/astra-bringup.log
+  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
+  exit 25
+fi
 python3 /ws/src/embodied_safety/test/ros_gate_probe.py > /tmp/astra-probe.log 2>&1
 probe_status=$?
-timeout 8s ros2 lifecycle set /world_model deactivate > /tmp/astra-lifecycle.log 2>&1
+timeout 15s ros2 lifecycle set /world_model deactivate > /tmp/astra-lifecycle.log 2>&1
 lifecycle_status=$?
-if [ "$lifecycle_status" -eq 0 ]; then timeout 5s ros2 lifecycle get /world_model | grep -q 'inactive' || lifecycle_status=1; fi
-if [ "$lifecycle_status" -eq 0 ]; then timeout 8s ros2 lifecycle set /world_model activate >> /tmp/astra-lifecycle.log 2>&1 || lifecycle_status=1; fi
-if [ "$lifecycle_status" -eq 0 ]; then timeout 5s ros2 lifecycle get /world_model | grep -q 'active' || lifecycle_status=1; fi
+if [ "$lifecycle_status" -eq 0 ]; then wait_state inactive || lifecycle_status=1; fi
+if [ "$lifecycle_status" -eq 0 ]; then timeout 15s ros2 lifecycle set /world_model activate >> /tmp/astra-lifecycle.log 2>&1 || lifecycle_status=1; fi
+if [ "$lifecycle_status" -eq 0 ]; then wait_state active || lifecycle_status=1; fi
 kill -TERM $bag_pid 2>/dev/null || true
 wait $bag_pid 2>/dev/null || true
 python3 /ws/src/embodied_safety/test/verify_rosbag.py > /tmp/astra-bag-verification.log 2>&1

@@ -23,6 +23,7 @@ from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
+from std_msgs.msg import Bool
 
 from .registry import SKILLS
 
@@ -44,6 +45,7 @@ class SkillServer(Node):
         self.entities = {}
         self.odom = None
         self.odom_wall = 0.0
+        self.odom_diagnostic_logged = False
         self.inspected = set()
         self.completed = {}
         self.running = set()
@@ -65,6 +67,7 @@ class SkillServer(Node):
             SkillFeedback, "/astra/skills/feedback", 8
         )
         self.intent = self.create_publisher(ControlIntent, "/astra/control/intent", 5)
+        self.disarm = self.create_publisher(Bool, "/astra/safety/arm", 1)
         self.speech = self.create_publisher(String, "/astra/skills/spoken_report", 4)
         self.create_subscription(
             PolicyDecision,
@@ -134,6 +137,21 @@ class SkillServer(Node):
             self.entities[entity.entity_id] = (entity, time.monotonic())
 
     def on_odom(self, odom):
+        stamp = odom.header.stamp.sec * 10**9 + odom.header.stamp.nanosec
+        age = (self.get_clock().now().nanoseconds - stamp) / 10**9
+        if (
+            odom.header.frame_id != "odom"
+            or odom.child_frame_id != "base_link"
+            or not -0.05 <= age <= 0.25
+            or not math.isfinite(odom.pose.pose.position.x)
+            or not math.isfinite(odom.pose.pose.position.y)
+        ):
+            if not self.odom_diagnostic_logged:
+                self.get_logger().warning(
+                    f"odometry rejected frame={odom.header.frame_id} child={odom.child_frame_id} age={age:.3f}"
+                )
+                self.odom_diagnostic_logged = True
+            return
         with self.lock:
             self.odom = odom
             self.odom_wall = time.monotonic()
@@ -245,7 +263,7 @@ class SkillServer(Node):
         stream.reason = reason
         self.feedback_pub.publish(stream)
 
-    def zero_intent(self, mission_id):
+    def send_intent(self, mission_id, linear=0.0, angular=0.0):
         intent = ControlIntent()
         intent.schema_version = "astra.control-intent.v1"
         intent.mission_id = mission_id
@@ -253,7 +271,71 @@ class SkillServer(Node):
         intent.clock_domain = "sim"
         intent.issued_at = self.get_clock().now().to_msg()
         intent.ttl_seconds = 0.2
+        intent.linear_meters_per_second = float(linear)
+        intent.angular_radians_per_second = float(angular)
         self.intent.publish(intent)
+
+    def zero_intent(self, mission_id):
+        self.send_intent(mission_id)
+        self.disarm.publish(Bool(data=False))
+
+    def align_base(self, goal_handle, deadline):
+        mission_id = goal_handle.request.mission_id
+        target_id = goal_handle.request.target_id
+        centered = 0
+        iterations = 0
+        while time.monotonic() < deadline:
+            if goal_handle.is_cancel_requested:
+                return "CANCELED", "operator_cancel"
+            safety = self.safety_state()
+            if safety == "STOPPED":
+                with self.lock:
+                    reason = (
+                        self.safety.reason if self.safety is not None else "unknown"
+                    )
+                return "SAFETY_STOP", reason
+            if safety != "READY":
+                return "SAFETY_NOT_READY", "safety_or_sensor_heartbeat_missing"
+            with self.lock:
+                active = self.safety is not None and self.safety.mode == "ACTIVE"
+                odom_fresh = (
+                    self.odom is not None and time.monotonic() - self.odom_wall <= 0.5
+                )
+            if not active or not odom_fresh:
+                time.sleep(0.05)
+                continue
+            if self.policy_state(mission_id) != "ALLOWED":
+                return "POLICY_DENIED", "goal_policy_expired_or_revoked"
+            entity = self.fresh_entity(target_id)
+            if entity is None:
+                self.get_logger().warning("alignment lost fresh RGB-D target")
+                return "STALE_TARGET", "rgbd_target_fact_expired"
+            horizontal = entity.pose.pose.position.x
+            depth = entity.pose.pose.position.z
+            if (
+                not math.isfinite(horizontal)
+                or not math.isfinite(depth)
+                or depth <= 0.1
+            ):
+                return "INVALID_TARGET", "nonfinite_or_invalid_rgbd_pose"
+            error = math.atan2(horizontal, depth)
+            iterations += 1
+            if iterations % 10 == 1:
+                self.get_logger().info(
+                    f"alignment bearing={error:.3f} horizontal={horizontal:.3f} depth={depth:.3f}"
+                )
+            if abs(error) <= 0.06:
+                centered += 1
+                self.send_intent(mission_id)
+                if centered >= 3:
+                    self.zero_intent(mission_id)
+                    return "OK", "rgbd_target_centered_with_odometry_and_safety"
+            else:
+                centered = 0
+                angular = max(-0.3, min(0.3, 1.2 * error))
+                self.send_intent(mission_id, angular=angular)
+            time.sleep(0.05)
+        return "TIMEOUT", "alignment_deadline_exceeded"
 
     def execute(self, goal_handle):
         request = goal_handle.request
@@ -297,8 +379,10 @@ class SkillServer(Node):
         request = goal_handle.request
         if request.skill_name == "safe_stop":
             self.zero_intent(request.mission_id)
-            return "OK", "zero_intent_sent_to_safety_gateway"
+            return "OK", "zero_intent_and_disarm_requested"
         deadline = time.monotonic() + request.timeout_seconds
+        if request.skill_name == "align_base":
+            return self.align_base(goal_handle, deadline)
         while time.monotonic() < deadline:
             if goal_handle.is_cancel_requested:
                 return "CANCELED", "operator_cancel"

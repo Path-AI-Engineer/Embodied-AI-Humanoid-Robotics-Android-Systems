@@ -6,15 +6,20 @@ import time
 import rclpy
 from astra_interfaces.action import SkillInvocation
 from astra_interfaces.msg import (
+    ControlIntent,
     EntityState,
     GoalRequest,
     PolicyDecision,
+    SafetyState,
     SkillDescriptor,
 )
+from geometry_msgs.msg import Twist
+from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from std_msgs.msg import Bool
 
 
 MISSION = "ros-skill-probe"
@@ -30,7 +35,13 @@ class Probe(Node):
         self.entities = []
         self.decisions = []
         self.catalog = set()
+        self.states = []
+        self.commands = []
+        self.odometry = []
+        self.keepalive = False
         self.goals = self.create_publisher(GoalRequest, "/astra/goals/request", 4)
+        self.arm = self.create_publisher(Bool, "/astra/safety/arm", 1)
+        self.intent = self.create_publisher(ControlIntent, "/astra/control/intent", 4)
         durable = QoSProfile(
             depth=12,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -43,6 +54,18 @@ class Probe(Node):
             PolicyDecision, "/astra/goals/decision", self.decisions.append, durable
         )
         self.create_subscription(
+            SafetyState, "/astra/safety/state", self.states.append, durable
+        )
+        self.create_subscription(
+            Twist, "/astra/control/authorized_cmd_vel", self.on_command, 4
+        )
+        self.create_subscription(
+            Odometry,
+            "/astra/sensors/odom",
+            self.odometry.append,
+            QoSProfile(depth=4, reliability=ReliabilityPolicy.BEST_EFFORT),
+        )
+        self.create_subscription(
             SkillDescriptor,
             "/astra/skills/catalog",
             lambda descriptor: self.catalog.add(descriptor.name),
@@ -50,6 +73,23 @@ class Probe(Node):
         )
         self.action = ActionClient(self, SkillInvocation, "/astra/skills/invoke")
         self.create_timer(0.15, self.refresh_goal)
+        self.create_timer(0.05, self.keepalive_zero)
+
+    def on_command(self, command):
+        self.commands.append(command)
+        if abs(command.angular.z) > 0.02:
+            self.keepalive = False
+
+    def keepalive_zero(self):
+        if self.keepalive and self.states and self.states[-1].mode == "ACTIVE":
+            zero = ControlIntent()
+            zero.schema_version = "astra.control-intent.v1"
+            zero.mission_id = MISSION
+            zero.frame_id = "base_link"
+            zero.clock_domain = "sim"
+            zero.issued_at = self.get_clock().now().to_msg()
+            zero.ttl_seconds = 0.2
+            self.intent.publish(zero)
 
     def refresh_goal(self):
         if self.get_clock().now().nanoseconds == 0:
@@ -98,6 +138,17 @@ class Probe(Node):
         )
         return result.reason
 
+    def arm_for_alignment(self):
+        deadline = time.monotonic() + 5.0
+        while time.monotonic() < deadline:
+            self.arm.publish(Bool(data=True))
+            rclpy.spin_once(self, timeout_sec=0.05)
+            if self.states and self.states[-1].mode == "ACTIVE":
+                self.keepalive = True
+                self.keepalive_zero()
+                return
+        raise AssertionError("operator arm failed before alignment")
+
 
 def main():
     rclpy.init()
@@ -116,11 +167,17 @@ def main():
             "wait_for_clearance",
             "inspect_entity",
             "speak_report",
-            "safe_stop",
         ):
-            passed[skill] = node.invoke(
-                skill, timeout=2.0 if skill == "safe_stop" else 5.0
-            )
+            passed[skill] = node.invoke(skill)
+        node.until(lambda: bool(node.odometry))
+        node.arm_for_alignment()
+        motion_index = len(node.commands)
+        passed["align_base"] = node.invoke("align_base", timeout=8.0)
+        node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
+        assert any(
+            abs(command.angular.z) > 0.02 for command in node.commands[motion_index:]
+        ), "alignment did not produce an authorized angular command"
+        passed["safe_stop"] = node.invoke("safe_stop", timeout=2.0)
         print(json.dumps({"skill_catalog": len(node.catalog), "passed": passed}))
     finally:
         node.destroy_node()

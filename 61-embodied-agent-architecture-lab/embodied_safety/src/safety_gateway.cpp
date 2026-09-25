@@ -73,6 +73,13 @@ class SafetyGateway final : public rclcpp::Node {
     arm_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/astra/safety/arm", rclcpp::QoS(1).reliable(),
         [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
+          if (!msg->data && mode_ == "ACTIVE") {
+            mode_ = "SAFE_IDLE";
+            reason_ = "operator_disarm";
+            publish_zero();
+            publish_state();
+            return;
+          }
           if (msg->data && mode_ == "SAFE_IDLE" && scan_fresh() && world_fresh() && policy_fresh()) {
             mode_ = "ACTIVE";
             reason_ = "operator_arm";
