@@ -4,23 +4,43 @@ import math
 
 import rclpy
 from astra_interfaces.msg import EntityState, Percept, WorldDelta
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 
 
-class WorldModel(Node):
+class WorldModel(LifecycleNode):
     def __init__(self):
         super().__init__("world_model")
+        self.active = False
         self.facts = {}
-        self.entities = self.create_publisher(EntityState, "/astra/world/entities", 8)
-        self.deltas = self.create_publisher(WorldDelta, "/astra/world/delta", 8)
+        self.entities = self.create_lifecycle_publisher(
+            EntityState, "/astra/world/entities", 8
+        )
+        self.deltas = self.create_lifecycle_publisher(
+            WorldDelta, "/astra/world/delta", 8
+        )
         sensor_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
         self.percepts = self.create_subscription(
             Percept, "/astra/perception/percepts", self.on_percept, sensor_qos
         )
         self.timer = self.create_timer(0.1, self.evict_stale)
 
+    def on_configure(self, state):
+        self.facts.clear()
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state):
+        self.active = True
+        return super().on_activate(state)
+
+    def on_deactivate(self, state):
+        self.active = False
+        self.facts.clear()
+        return super().on_deactivate(state)
+
     def on_percept(self, percept):
+        if not self.active:
+            return
         if (
             percept.schema_version != "astra.percept.v1"
             or percept.clock_domain != "sim"
@@ -34,7 +54,7 @@ class WorldModel(Node):
             return
         observed_ns = percept.observed_at.sec * 10**9 + percept.observed_at.nanosec
         now_ns = self.get_clock().now().nanoseconds
-        if not 0 <= (now_ns - observed_ns) / 10**9 <= percept.ttl_seconds:
+        if not -0.05 <= (now_ns - observed_ns) / 10**9 <= percept.ttl_seconds:
             return
         valid_ns = observed_ns + int(percept.ttl_seconds * 10**9)
         entity = EntityState()
@@ -52,6 +72,8 @@ class WorldModel(Node):
         self.publish_delta([entity.entity_id], [])
 
     def evict_stale(self):
+        if not self.active:
+            return
         now_ns = self.get_clock().now().nanoseconds
         expired = [
             name

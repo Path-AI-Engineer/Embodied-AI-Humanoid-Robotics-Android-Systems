@@ -29,7 +29,7 @@ def main():
                 lambda msg: observed.append(msg.linear.x),
                 10,
             )
-            deadline = time.monotonic() + 6.0
+            deadline = time.monotonic() + 15.0
             while time.monotonic() < deadline:
                 rclpy.spin_once(node, timeout_sec=0.1)
             result = {
@@ -44,7 +44,7 @@ def main():
                 Twist, "/astra/control/authorized_cmd_vel", 10
             )
             value = 0.12 if args.role == "authorized" else 0.27
-            deadline = time.monotonic() + 2.0
+            deadline = time.monotonic() + 10.0
             while time.monotonic() < deadline:
                 msg = Twist()
                 msg.linear.x = value

@@ -23,11 +23,25 @@ gz sdf -k /ws/install/share/astra_simulation/worlds/embodied_lab.sdf >/dev/null 
 timeout 45s ros2 launch astra_bringup headless.launch.py > /tmp/astra-bringup.log 2>&1 &
 launch_pid=$!
 sleep 8
+wait_active() {
+  for attempt in $(seq 1 20); do
+    if timeout 3s ros2 lifecycle get "$1" 2>/dev/null | grep -q 'active'; then return 0; fi
+    sleep 1
+  done
+  return 1
+}
+if ! wait_active /lidar_perception; then echo 'lidar lifecycle activation timed out' >&2; exit 21; fi
+if ! wait_active /world_model; then echo 'world lifecycle activation timed out' >&2; exit 22; fi
 ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /clock > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
 sleep 2
 python3 /ws/src/embodied_safety/test/ros_gate_probe.py > /tmp/astra-probe.log 2>&1
 probe_status=$?
+ros2 lifecycle set /world_model deactivate > /tmp/astra-lifecycle.log 2>&1
+lifecycle_status=$?
+if [ "$lifecycle_status" -eq 0 ]; then ros2 lifecycle get /world_model | grep -q 'inactive' || lifecycle_status=1; fi
+if [ "$lifecycle_status" -eq 0 ]; then ros2 lifecycle set /world_model activate >> /tmp/astra-lifecycle.log 2>&1 || lifecycle_status=1; fi
+if [ "$lifecycle_status" -eq 0 ]; then ros2 lifecycle get /world_model | grep -q 'active' || lifecycle_status=1; fi
 kill -TERM $bag_pid 2>/dev/null || true
 wait $bag_pid 2>/dev/null || true
 python3 /ws/src/embodied_safety/test/verify_rosbag.py > /tmp/astra-bag-verification.log 2>&1
@@ -37,6 +51,7 @@ wait $launch_pid 2>/dev/null || true
 cat /tmp/astra-bringup.log
 cat /tmp/astra-probe.log
 if [ "$probe_status" -ne 0 ]; then exit 19; fi
+if [ "$lifecycle_status" -ne 0 ]; then cat /tmp/astra-lifecycle.log; exit 23; fi
 cat /tmp/astra-bag-verification.log
 if [ "$bag_status" -ne 0 ]; then cat /tmp/astra-bag.log; exit 20; fi
 if grep -Eq 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log; then exit 14; fi

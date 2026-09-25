@@ -12,7 +12,7 @@ export ROS_SECURITY_KEYSTORE=/tmp/astra-keystore
 export ROS_SECURITY_STRATEGY=Enforce
 python3 /ws/src/embodied_safety/test/sros2_probe.py listener --ros-args --enclave /astra/safety > /tmp/security-listener.log 2>&1 &
 listener_pid=$!
-sleep 1
+sleep 2
 python3 /ws/src/embodied_safety/test/sros2_probe.py authorized --ros-args --enclave /astra/safety > /tmp/security-authorized.log 2>&1 &
 authorized_pid=$!
 python3 /ws/src/embodied_safety/test/sros2_probe.py unauthorized --ros-args --enclave /astra/unauthorized > /tmp/security-unauthorized.log 2>&1 &

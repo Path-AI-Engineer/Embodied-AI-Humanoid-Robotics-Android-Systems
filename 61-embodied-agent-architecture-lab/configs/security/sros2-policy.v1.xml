@@ -12,6 +12,7 @@
           <topics subscribe="ALLOW">
             <topic>/clock</topic><topic>/parameter_events</topic>
             <topic>/astra/sensors/scan</topic><topic>/astra/control/intent</topic>
+            <topic>/astra/world/entities</topic><topic>/astra/goals/decision</topic>
             <topic>/astra/safety/estop</topic><topic>/astra/safety/arm</topic>
             <topic>/astra/safety/recovery</topic>
           </topics>

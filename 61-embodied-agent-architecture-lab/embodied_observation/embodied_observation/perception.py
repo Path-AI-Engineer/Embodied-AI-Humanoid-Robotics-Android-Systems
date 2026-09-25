@@ -4,31 +4,47 @@ import math
 
 import rclpy
 from astra_interfaces.msg import Percept
-from rclpy.node import Node
+from rclpy.lifecycle import LifecycleNode, TransitionCallbackReturn
 from rclpy.qos import QoSProfile, ReliabilityPolicy
 from sensor_msgs.msg import LaserScan
 
 
-class LidarPerception(Node):
+class LidarPerception(LifecycleNode):
     def __init__(self):
         super().__init__("lidar_perception")
+        self.active = False
         sensor_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
         percept_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.publisher = self.create_publisher(
+        self.publisher = self.create_lifecycle_publisher(
             Percept, "/astra/perception/percepts", percept_qos
         )
         self.subscription = self.create_subscription(
             LaserScan, "/astra/sensors/scan", self.on_scan, sensor_qos
         )
 
+    def on_configure(self, state):
+        return TransitionCallbackReturn.SUCCESS
+
+    def on_activate(self, state):
+        self.active = True
+        return super().on_activate(state)
+
+    def on_deactivate(self, state):
+        self.active = False
+        return super().on_deactivate(state)
+
     def on_scan(self, scan):
+        if not self.active:
+            return
         if scan.header.frame_id != "astra/base_footprint/lidar_2d":
             return
         age = (
             self.get_clock().now().nanoseconds
             - (scan.header.stamp.sec * 10**9 + scan.header.stamp.nanosec)
         ) / 10**9
-        if not 0 <= age <= 0.25 or scan.angle_increment <= 0:
+        # /clock and LaserScan use independent DDS streams; a small apparent
+        # future timestamp is transport ordering, not a different clock domain.
+        if not -0.05 <= age <= 0.25 or scan.angle_increment <= 0:
             return
         candidates = [
             (distance, scan.angle_min + index * scan.angle_increment)

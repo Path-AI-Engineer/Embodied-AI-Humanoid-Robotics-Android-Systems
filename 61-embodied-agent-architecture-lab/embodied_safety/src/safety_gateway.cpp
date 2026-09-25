@@ -6,7 +6,9 @@
 #include <string>
 
 #include "astra_interfaces/msg/control_intent.hpp"
+#include "astra_interfaces/msg/entity_state.hpp"
 #include "astra_interfaces/msg/fault_event.hpp"
+#include "astra_interfaces/msg/policy_decision.hpp"
 #include "astra_interfaces/msg/safety_state.hpp"
 #include "geometry_msgs/msg/twist.hpp"
 #include "rclcpp/rclcpp.hpp"
@@ -26,6 +28,34 @@ class SafetyGateway final : public rclcpp::Node {
     scan_sub_ = create_subscription<sensor_msgs::msg::LaserScan>(
         "/astra/sensors/scan", sensor_qos,
         [this](sensor_msgs::msg::LaserScan::ConstSharedPtr scan) { on_scan(*scan); });
+    world_sub_ = create_subscription<astra_interfaces::msg::EntityState>(
+        "/astra/world/entities", rclcpp::QoS(8).reliable(),
+        [this](astra_interfaces::msg::EntityState::ConstSharedPtr entity) {
+          const double age = (now() - rclcpp::Time(entity->observed_at)).seconds();
+          if (entity->schema_version == "astra.entity-state.v1" &&
+              entity->entity_id == "obstacle/front" && entity->clock_domain == "sim" &&
+              entity->frame_id == "astra/base_footprint/lidar_2d" &&
+              entity->provenance == "/astra/sensors/scan" &&
+              std::isfinite(entity->confidence) && entity->confidence >= 0.7f &&
+              age >= -0.05 && age <= 0.25) {
+            last_world_wall_ = std::chrono::steady_clock::now();
+          }
+        });
+    policy_sub_ = create_subscription<astra_interfaces::msg::PolicyDecision>(
+        "/astra/goals/decision", rclcpp::QoS(4).reliable().transient_local(),
+        [this](astra_interfaces::msg::PolicyDecision::ConstSharedPtr decision) {
+          const double age = (now() - rclcpp::Time(decision->decided_at)).seconds();
+          if (decision->schema_version == "astra.policy-decision.v1" &&
+              decision->frame_id == "map" && decision->clock_domain == "sim" &&
+              decision->allowed && decision->result_code == "OK" &&
+              !decision->mission_id.empty() && age >= -0.05 && age <= 1.0) {
+            authorized_mission_ = decision->mission_id;
+            last_policy_wall_ = std::chrono::steady_clock::now();
+          } else if (decision->mission_id == authorized_mission_) {
+            authorized_mission_.clear();
+            if (mode_ == "ACTIVE") stop("PROTECTIVE_STOP", "policy_revoked", false);
+          }
+        });
     intent_sub_ = create_subscription<astra_interfaces::msg::ControlIntent>(
         "/astra/control/intent", rclcpp::QoS(5).reliable(),
         [this](astra_interfaces::msg::ControlIntent::ConstSharedPtr intent) { on_intent(*intent); });
@@ -37,7 +67,7 @@ class SafetyGateway final : public rclcpp::Node {
     arm_sub_ = create_subscription<std_msgs::msg::Bool>(
         "/astra/safety/arm", rclcpp::QoS(1).reliable(),
         [this](std_msgs::msg::Bool::ConstSharedPtr msg) {
-          if (msg->data && mode_ == "SAFE_IDLE" && scan_fresh()) {
+          if (msg->data && mode_ == "SAFE_IDLE" && scan_fresh() && world_fresh() && policy_fresh()) {
             mode_ = "ACTIVE";
             reason_ = "operator_arm";
             last_intent_wall_ = std::chrono::steady_clock::now();
@@ -58,13 +88,15 @@ class SafetyGateway final : public rclcpp::Node {
     watchdog_ = create_wall_timer(50ms, [this]() {
       if (!ready_ && std::chrono::steady_clock::now() - started_wall_ > 30s) {
         stop("PROTECTIVE_STOP", "sensor_startup_timeout", false);
-      } else if (ready_ && !scan_fresh()) {
-        if (mode_ != "EMERGENCY_STOP") stop("PROTECTIVE_STOP", "scan_heartbeat_lost", false);
+      } else if (ready_ && !scan_fresh() && mode_ == "ACTIVE") {
+        stop("PROTECTIVE_STOP", "scan_heartbeat_lost", false);
       } else if (ready_ && mode_ == "INIT") {
         mode_ = "SAFE_IDLE";
         reason_ = "sensor_self_check_passed";
       }
       if (mode_ != "ACTIVE") publish_zero();
+      else if (!world_fresh()) stop("PROTECTIVE_STOP", "world_heartbeat_lost", false);
+      else if (!policy_fresh()) stop("PROTECTIVE_STOP", "policy_authorization_expired", false);
       else if (last_intent_wall_.time_since_epoch().count() == 0 ||
                std::chrono::steady_clock::now() - last_intent_wall_ > 250ms) {
         stop("PROTECTIVE_STOP", "intent_heartbeat_lost", false);
@@ -79,16 +111,26 @@ class SafetyGateway final : public rclcpp::Node {
     return ready_ && std::chrono::steady_clock::now() - last_scan_wall_ <= 750ms;
   }
 
+  bool world_fresh() const {
+    return last_world_wall_.time_since_epoch().count() != 0 &&
+           std::chrono::steady_clock::now() - last_world_wall_ <= 750ms;
+  }
+
+  bool policy_fresh() const {
+    return !authorized_mission_.empty() && last_policy_wall_.time_since_epoch().count() != 0 &&
+           std::chrono::steady_clock::now() - last_policy_wall_ <= 1s;
+  }
+
   void on_scan(const sensor_msgs::msg::LaserScan &scan) {
     if (scan.header.frame_id != "astra/base_footprint/lidar_2d" || scan.angle_increment <= 0 ||
         scan.ranges.empty()) {
-      if (ready_) stop("PROTECTIVE_STOP", "invalid_scan_frame_or_geometry", false);
+      if (mode_ == "ACTIVE") stop("PROTECTIVE_STOP", "invalid_scan_frame_or_geometry", false);
       return;
     }
     const rclcpp::Time sample(scan.header.stamp);
     const auto age = (now() - sample).seconds();
     if (age < -0.05 || age > 0.35) {
-      if (ready_) stop("PROTECTIVE_STOP", "invalid_scan_timestamp", false);
+      if (mode_ == "ACTIVE") stop("PROTECTIVE_STOP", "invalid_scan_timestamp", false);
       return;
     }
     float clearance = std::numeric_limits<float>::infinity();
@@ -100,7 +142,7 @@ class SafetyGateway final : public rclcpp::Node {
       }
     }
     if (!std::isfinite(clearance)) {
-      if (ready_) stop("PROTECTIVE_STOP", "front_clearance_unknown", false);
+      if (mode_ == "ACTIVE") stop("PROTECTIVE_STOP", "front_clearance_unknown", false);
       return;
     }
     const auto current_wall = std::chrono::steady_clock::now();
@@ -115,7 +157,7 @@ class SafetyGateway final : public rclcpp::Node {
   }
 
   void on_intent(const astra_interfaces::msg::ControlIntent &intent) {
-    if (mode_ != "ACTIVE" || estop_latched_ || !scan_fresh()) {
+    if (mode_ != "ACTIVE" || estop_latched_ || !scan_fresh() || !world_fresh() || !policy_fresh()) {
       publish_zero();
       return;
     }
@@ -123,7 +165,7 @@ class SafetyGateway final : public rclcpp::Node {
     const double age = (now() - issued).seconds();
     const bool valid = intent.schema_version == "astra.control-intent.v1" &&
                        intent.frame_id == "base_link" && intent.clock_domain == "sim" &&
-                       !intent.mission_id.empty() && intent.ttl_seconds > 0 && intent.ttl_seconds <= 0.25f &&
+                       intent.mission_id == authorized_mission_ && intent.ttl_seconds > 0 && intent.ttl_seconds <= 0.25f &&
                        age >= -0.05 && age <= intent.ttl_seconds &&
                        std::isfinite(intent.linear_meters_per_second) &&
                        std::isfinite(intent.angular_radians_per_second) &&
@@ -181,6 +223,7 @@ class SafetyGateway final : public rclcpp::Node {
 
   std::string mode_ = "INIT";
   std::string reason_ = "waiting_for_sensor";
+  std::string authorized_mission_;
   bool estop_latched_ = false;
   bool have_scan_ = false;
   bool ready_ = false;
@@ -190,10 +233,14 @@ class SafetyGateway final : public rclcpp::Node {
   std::chrono::steady_clock::time_point started_wall_;
   std::chrono::steady_clock::time_point last_scan_wall_;
   std::chrono::steady_clock::time_point last_intent_wall_;
+  std::chrono::steady_clock::time_point last_world_wall_;
+  std::chrono::steady_clock::time_point last_policy_wall_;
   rclcpp::Publisher<geometry_msgs::msg::Twist>::SharedPtr command_pub_;
   rclcpp::Publisher<astra_interfaces::msg::SafetyState>::SharedPtr state_pub_;
   rclcpp::Publisher<astra_interfaces::msg::FaultEvent>::SharedPtr fault_pub_;
   rclcpp::Subscription<sensor_msgs::msg::LaserScan>::SharedPtr scan_sub_;
+  rclcpp::Subscription<astra_interfaces::msg::EntityState>::SharedPtr world_sub_;
+  rclcpp::Subscription<astra_interfaces::msg::PolicyDecision>::SharedPtr policy_sub_;
   rclcpp::Subscription<astra_interfaces::msg::ControlIntent>::SharedPtr intent_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr estop_sub_;
   rclcpp::Subscription<std_msgs::msg::Bool>::SharedPtr arm_sub_;

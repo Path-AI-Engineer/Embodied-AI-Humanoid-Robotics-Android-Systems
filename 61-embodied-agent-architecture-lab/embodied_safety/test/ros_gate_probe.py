@@ -60,8 +60,51 @@ class Probe(Node):
             if predicate():
                 return
         raise AssertionError(
-            f"timed out; last state={self.states[-1] if self.states else 'none'}"
+            f"timed out; last state={self.states[-1] if self.states else 'none'}; "
+            f"percepts={len(self.percepts)}; entities={len(self.entities)}; "
+            f"decisions={len(self.decisions)}"
         )
+
+
+def arm_with_fresh_policy(node, goal):
+    """Retry the asynchronous goal/arm handshake without bypassing the gateway."""
+    deadline = time.monotonic() + 8.0
+    next_request = 0.0
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now >= next_request and node.states:
+            goal.requested_at = node.states[-1].observed_at
+            node.goals.publish(goal)
+            node.arm.publish(Bool(data=True))
+            next_request = now + 0.2
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if node.states and node.states[-1].mode == "ACTIVE":
+            return
+    raise AssertionError(
+        "goal/arm handshake timed out; "
+        f"state={node.states[-1] if node.states else 'none'}; "
+        f"decision={node.decisions[-1] if node.decisions else 'none'}"
+    )
+
+
+def request_decision(node, goal, expected):
+    """Wait for the goal gateway to discover the publisher and decide."""
+    prior_decisions = len(node.decisions)
+    deadline = time.monotonic() + 8.0
+    next_request = 0.0
+    while time.monotonic() < deadline:
+        now = time.monotonic()
+        if now >= next_request and node.states:
+            goal.requested_at = node.states[-1].observed_at
+            node.goals.publish(goal)
+            next_request = now + 0.2
+        rclpy.spin_once(node, timeout_sec=0.05)
+        if len(node.decisions) > prior_decisions and expected(node.decisions[-1]):
+            return
+    raise AssertionError(
+        "goal decision timed out; "
+        f"decision={node.decisions[-1] if node.decisions else 'none'}"
+    )
 
 
 def main():
@@ -75,6 +118,10 @@ def main():
         node.until(lambda: any(s.mode == "SAFE_IDLE" for s in node.states))
         node.until(lambda: any(p.entity_id == "obstacle/front" for p in node.percepts))
         node.until(lambda: any(e.entity_id == "obstacle/front" for e in node.entities))
+        node.arm.publish(Bool(data=True))
+        for _ in range(5):
+            rclpy.spin_once(node, timeout_sec=0.05)
+        assert node.states[-1].mode == "SAFE_IDLE", "arm bypassed policy"
         goal = GoalRequest()
         goal.schema_version = "astra.goal-request.v1"
         goal.mission_id = "ros-policy-probe"
@@ -83,24 +130,23 @@ def main():
         goal.requested_by = "local-operator"
         goal.frame_id = "map"
         goal.clock_domain = "sim"
-        goal.requested_at = node.states[-1].observed_at
         goal.ttl_seconds = 0.8
-        node.goals.publish(goal)
-        node.until(lambda: node.decisions and node.decisions[-1].allowed)
+        request_decision(node, goal, lambda decision: decision.allowed)
         goal.station_id = "restricted-station"
         goal.approved_restricted_zone = True
-        goal.requested_at = node.states[-1].observed_at
-        node.goals.publish(goal)
-        node.until(
-            lambda: node.decisions
-            and node.decisions[-1].result_code == "APPROVAL_REQUIRED"
-            and not node.decisions[-1].allowed
+        request_decision(
+            node,
+            goal,
+            lambda decision: decision.result_code == "APPROVAL_REQUIRED"
+            and not decision.allowed,
         )
-        node.arm.publish(Bool(data=True))
-        node.until(lambda: node.states and node.states[-1].mode == "ACTIVE")
+        goal.station_id = "inspection-station"
+        goal.approved_restricted_zone = False
+        request_decision(node, goal, lambda decision: decision.allowed)
+        arm_with_fresh_policy(node, goal)
         intent = ControlIntent()
         intent.schema_version = "astra.control-intent.v1"
-        intent.mission_id = "ros-gate-probe"
+        intent.mission_id = goal.mission_id
         intent.frame_id = "base_link"
         intent.clock_domain = "sim"
         intent.issued_at = node.states[-1].observed_at
@@ -120,8 +166,8 @@ def main():
         assert all(c.linear.x == 0.0 for c in node.commands[zero_index:])
         node.recover.publish(Bool(data=True))
         node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
-        node.arm.publish(Bool(data=True))
-        node.until(lambda: node.states and node.states[-1].mode == "ACTIVE")
+        request_decision(node, goal, lambda decision: decision.allowed)
+        arm_with_fresh_policy(node, goal)
         bad = ControlIntent()
         bad.schema_version = intent.schema_version
         bad.mission_id = intent.mission_id
