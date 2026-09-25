@@ -17,11 +17,11 @@ The Python harness enforces these boundaries within a cooperative process. It is
 
 ## Pre-registered acceptance
 
-- All 11 interface catalog entries define owner, endpoint, frame, units, freshness, deadline, QoS and result codes.
+- All 12 interface catalog entries define owner, endpoint, frame, units, freshness, deadline, QoS and result codes.
 - All 64 development fixtures terminate with verifiable evidence; 32 test fixtures remain held out until profile, robot, policy, and scoring are frozen.
 - No motor commit occurs without the bound gateway and a positive safety decision. Bypass attempts and speed, age, contact, human-proximity, heartbeat, transform, localization and queue faults must be rejected or stopped.
 - Clock-domain and frame mismatches are explicit errors, never silent conversion.
-- The ROS/Gazebo image must compile all workspace packages, expand Astra Xacro, validate the world, and complete headless spawn without crashed processes.
+- The ROS/Gazebo image must compile all workspace packages, expand Astra Xacro, validate the world, and complete 12 clean headless bringups without crashed processes. Sensor-to-world, policy, safety and bag event-order probes must pass on each bringup.
 - The production workbench must load local evidence and pass desktop/mobile keyboard and overflow checks.
 
-The profile is Lyrical/Jetty only. If its clean runtime cannot pass, document the exact blocker in an ADR before considering the permitted Jazzy/Harmonic fallback. The frozen test split, ROS lifecycle/fault campaign, rosbag2/SROS2, MoveIt and BehaviorTree.CPP integration, and cross-repository contract approval remain distinct closure gates; a passing portable gate does not waive them.
+The profile is Lyrical/Jetty only. If its clean runtime cannot pass, document the exact blocker in an ADR before considering the permitted Jazzy/Harmonic fallback. The frozen test split, ROS lifecycle/fault campaign, exact rosbag replay, SROS2 enforcement, MoveIt and BehaviorTree.CPP integration, and cross-repository contract approval remain distinct closure gates; a passing portable gate does not waive them. Until graph permissions are enforced, the ROS command topic is not protected from an untrusted publisher.

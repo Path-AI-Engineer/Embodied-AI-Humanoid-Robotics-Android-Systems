@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from math import isfinite
 
 from .contracts import (
     ClockDomain,
@@ -116,7 +117,15 @@ class SafetySupervisor:
                 False, ResultCode.DEADLINE_MISSED, "command deadline or age exceeded"
             )
         if (
-            abs(command.linear_mps) > 0.35
+            not all(
+                isfinite(v)
+                for v in (
+                    command.linear_mps,
+                    command.angular_radps,
+                    command.arm_velocity_radps,
+                )
+            )
+            or abs(command.linear_mps) > 0.35
             or abs(command.angular_radps) > 0.8
             or abs(command.arm_velocity_radps) > 0.5
         ):
@@ -130,6 +139,20 @@ class SafetySupervisor:
 
     @staticmethod
     def _monitor(signals: SafetySignals) -> str | None:
+        if (
+            not all(
+                isfinite(v) and v >= 0
+                for v in (
+                    signals.heartbeat_age_s,
+                    signals.sensor_age_s,
+                    signals.transform_age_s,
+                    signals.human_distance_m,
+                    signals.localization_confidence,
+                )
+            )
+            or signals.queue_depth < 0
+        ):
+            return "invalid safety telemetry"
         if signals.contact:
             return "bumper contact"
         if signals.human_distance_m < 0.8:

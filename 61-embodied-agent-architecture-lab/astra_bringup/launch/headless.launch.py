@@ -1,4 +1,4 @@
-"""Headless Gazebo bringup. Motor command bridging is intentionally absent."""
+"""Headless Gazebo bringup with a bounded, independent safety gateway."""
 
 from pathlib import Path
 
@@ -21,5 +21,9 @@ def generate_launch_description():
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(gz_share / "launch" / "gz_sim.launch.py")), launch_arguments={"gz_args": f"-r -s {world}"}.items()),
         Node(package="robot_state_publisher", executable="robot_state_publisher", namespace="astra", parameters=[{"robot_description": robot_xml, "use_sim_time": True}]),
         Node(package="ros_gz_bridge", executable="parameter_bridge", name="sensor_bridge", parameters=[{"config_file": str(bringup_share / "config" / "bridge.yaml"), "use_sim_time": True}]),
+        Node(package="embodied_safety", executable="safety_gateway", name="safety_gateway", parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="embodied_observation", executable="lidar_perception", name="lidar_perception", parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="embodied_observation", executable="world_model", name="world_model", parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="embodied_goals", executable="goal_gateway", name="goal_gateway", parameters=[{"use_sim_time": True}], output="screen"),
         ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen"),
     ])

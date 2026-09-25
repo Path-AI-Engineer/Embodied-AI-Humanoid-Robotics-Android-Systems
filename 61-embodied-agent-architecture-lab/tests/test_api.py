@@ -26,7 +26,7 @@ class WorkbenchApiTests(unittest.TestCase):
         with urlopen(self.base + "/api/overview", timeout=3) as response:
             overview = json.load(response)
         self.assertEqual(overview["summary"]["count"], 64)
-        self.assertEqual(len(overview["catalog"]["interfaces"]), 11)
+        self.assertEqual(len(overview["catalog"]["interfaces"]), 12)
         with urlopen(self.base + "/api/runs/mission-000", timeout=3) as response:
             record = json.load(response)
         self.assertEqual(record["payload"]["outcome"], "SUCCESS")

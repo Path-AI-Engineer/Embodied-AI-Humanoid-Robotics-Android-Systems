@@ -1,0 +1,13 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>embodied_observation</name>
+  <version>0.1.0</version>
+  <description>Separate lidar perception and temporal world-model ROS processes.</description>
+  <maintainer email="engineering@example.invalid">Embodied Systems Lab</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_python</buildtool_depend>
+  <exec_depend>rclpy</exec_depend>
+  <exec_depend>astra_interfaces</exec_depend>
+  <exec_depend>sensor_msgs</exec_depend>
+  <export><build_type>ament_python</build_type></export>
+</package>

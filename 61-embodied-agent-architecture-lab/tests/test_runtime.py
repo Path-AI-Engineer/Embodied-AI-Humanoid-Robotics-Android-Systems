@@ -1,4 +1,5 @@
 import json
+import math
 import unittest
 from dataclasses import replace
 from pathlib import Path
@@ -56,7 +57,7 @@ class ContractTests(unittest.TestCase):
             (ROOT / "contracts/interface-catalog.v1.json").read_text(encoding="utf-8")
         )
         names = {entry["name"] for entry in catalog["interfaces"]}
-        self.assertEqual(len(names), 11)
+        self.assertEqual(len(names), 12)
         for entry in catalog["interfaces"]:
             for required in (
                 "owner",
@@ -125,6 +126,19 @@ class SafetyTests(unittest.TestCase):
             self.now,
         )
         self.assertEqual(denied.code, ResultCode.DEADLINE_MISSED)
+
+    def test_nonfinite_motion_and_telemetry_fail_closed(self) -> None:
+        denied = self.supervisor.authorize(
+            self.command(linear_mps=math.nan), SafetySignals(), self.now
+        )
+        self.assertEqual(denied.code, ResultCode.SAFETY_STOP)
+        self.assertEqual(self.supervisor.mode, SafetyMode.PROTECTIVE_STOP)
+
+        fresh = SafetySupervisor()
+        self.assertFalse(
+            fresh.self_check(SafetySignals(human_distance_m=math.nan), self.now).allowed
+        )
+        self.assertEqual(fresh.mode, SafetyMode.PROTECTIVE_STOP)
 
 
 class MissionTests(unittest.TestCase):

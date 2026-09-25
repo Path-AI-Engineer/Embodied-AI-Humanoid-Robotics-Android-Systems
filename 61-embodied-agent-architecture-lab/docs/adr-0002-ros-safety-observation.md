@@ -1,0 +1,11 @@
+# ADR 0002 — ROS observation, policy and safety integration
+
+Status: accepted as a simulation integration checkpoint; not a Project 61 release approval.
+
+Gazebo lidar scans are bridged to ROS 2 with their original timestamps and frames. `lidar_perception` converts a valid front-sector return into a conservative `obstacle/front` percept. It does not assert object identity or use Gazebo model state. A separate `world_model` process checks source, frame, clock, confidence and TTL before publishing a short-lived entity fact and delta. The goal gateway accepts a typed allowlisted fixture goal but rejects a restricted-zone approval represented only by an untrusted Boolean.
+
+The C++ safety gateway is independent of the goal and world-model processes. It alone is configured to produce the bridge's authorized Twist in this launch file. It waits for a fresh scan before arming, checks command schema/frame/clock/age/finite values/speed and minimum front clearance, publishes zero on watchdog expiry, and latches E-stop. A recovery request returns to SAFE_IDLE only after a fresh self-check; it does not resume motion. The arm channel has not been integrated with MoveIt and is explicitly rejected by this gateway. This is a research safeguard, not certified functional safety.
+
+The ROS smoke probe observes sensor → percept → world, allowed/denied policy, bounded motion, E-stop, recovery and speed rejection. It records selected topics to rosbag2 and checks that no nonzero gateway command appears between the recorded E-stop event and recovery. This bag check validates an event-order invariant; it is not exact replay equivalence and does not prove physical stopping distance or hard real-time deadlines. The bag is ephemeral in each container and its checksum is printed by the gate.
+
+The default launch is currently a trusted local lab graph. A separate SROS2 fixture generates ephemeral keystores and has passed a positive/negative DDS publisher test: the approved enclave's message is received, while an unauthorized enclave's attempt to publish to `/astra/control/authorized_cmd_vel` is denied. That result does **not** enforce permissions on the default Gazebo launch or on `/astra/safety/arm` and `/astra/safety/recovery`; those remain release blockers. Do not deploy this profile as a security boundary.

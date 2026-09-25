@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>embodied_safety</name>
+  <version>0.1.0</version>
+  <description>Independent bounded motor-command gateway for the Astra simulation.</description>
+  <maintainer email="engineering@example.invalid">Embodied Systems Lab</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>rclcpp</depend>
+  <depend>astra_interfaces</depend>
+  <depend>sensor_msgs</depend>
+  <depend>geometry_msgs</depend>
+  <depend>std_msgs</depend>
+</package>

@@ -9,6 +9,7 @@ rosidl_generate_interfaces(${PROJECT_NAME}
   "msg/EntityState.msg"
   "msg/WorldDelta.msg"
   "msg/GoalRequest.msg"
+  "msg/ControlIntent.msg"
   "msg/PolicyDecision.msg"
   "msg/SkillDescriptor.msg"
   "msg/SkillFeedback.msg"

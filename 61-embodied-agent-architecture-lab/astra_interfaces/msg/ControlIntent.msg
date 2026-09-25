@@ -1,0 +1,9 @@
+string schema_version
+string mission_id
+string frame_id
+string clock_domain
+builtin_interfaces/Time issued_at
+float32 ttl_seconds
+float32 linear_meters_per_second
+float32 angular_radians_per_second
+float32 arm_radians_per_second

@@ -1,0 +1,9 @@
+string schema_version
+string name
+string frame_id
+string clock_domain
+builtin_interfaces/Time valid_at
+float32 timeout_seconds
+bool requires_human_approval
+string[] preconditions
+string[] postconditions

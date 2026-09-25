@@ -18,9 +18,9 @@ $env:EMBODIED_PROJECT_ROOT = $projectRoot
 Push-Location $projectRoot
 try {
     Write-Host '  -> Ruff lint and format' -ForegroundColor Cyan
-    & $Python -m ruff check src tests scripts
+    & $Python -m ruff check src tests scripts embodied_observation embodied_goals embodied_safety
     Assert-Exit 'Ruff lint'
-    & $Python -m ruff format --check src tests scripts
+    & $Python -m ruff format --check src tests scripts embodied_observation embodied_goals embodied_safety
     Assert-Exit 'Ruff format'
     Write-Host '  -> Development scenario evaluation' -ForegroundColor Cyan
     & $Python -m embodied.cli evaluate --split development --out reports/local
@@ -28,6 +28,9 @@ try {
     Write-Host '  -> Unit and API tests' -ForegroundColor Cyan
     & $Python -m unittest discover -s tests -v
     Assert-Exit 'Unit and API tests'
+    Write-Host '  -> Data-only handoff candidate checksums' -ForegroundColor Cyan
+    & $Python scripts/verify_contract_handoff.py
+    Assert-Exit 'Contract handoff candidate'
     if (-not $SkipWeb) {
         Push-Location (Join-Path $projectRoot 'apps\workbench')
         try {
@@ -46,6 +49,8 @@ try {
     if ($RequireRos) {
         & (Join-Path $PSScriptRoot 'ros-smoke.ps1')
         Assert-Exit 'ROS/Gazebo smoke'
+        & (Join-Path $PSScriptRoot 'security-smoke.ps1')
+        Assert-Exit 'SROS2 allow/deny fixture'
     }
     git -c "safe.directory=$(Split-Path -Parent $projectRoot)" diff --check
     Assert-Exit 'git diff --check'

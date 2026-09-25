@@ -1,9 +1,9 @@
 string schema_version
-string mode
+string mission_id
+string skill_name
 string frame_id
 string clock_domain
 builtin_interfaces/Time observed_at
-bool estop_latched
-float32 sensor_age_seconds
-float32 minimum_front_clearance_meters
+float32 progress_ratio
+string result_code
 string reason

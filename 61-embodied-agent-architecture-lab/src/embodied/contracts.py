@@ -77,6 +77,8 @@ class Observation:
     y_m: float
 
     def validate(self, now: Stamp) -> ResultCode:
+        if not isfinite(self.ttl_seconds) or not 0 < self.ttl_seconds <= 1:
+            return ResultCode.PRECONDITION_FAILED
         if self.frame_id not in FRAME_IDS and not self.frame_id.startswith("object/"):
             return ResultCode.FRAME_MISMATCH
         if self.observed_at.domain != now.domain or now.domain != ClockDomain.SIM:
@@ -86,7 +88,11 @@ class Observation:
             or now.seconds - self.observed_at.seconds > self.ttl_seconds
         ):
             return ResultCode.STALE
-        if self.confidence < 0.7 or not 0 <= self.confidence <= 1:
+        if (
+            not isfinite(self.confidence)
+            or self.confidence < 0.7
+            or self.confidence > 1
+        ):
             return ResultCode.LOW_CONFIDENCE
         if self.covariance_m2 < 0 or not all(
             isfinite(v) for v in (self.x_m, self.y_m, self.covariance_m2)

@@ -1,0 +1,10 @@
+string schema_version
+string entity_id
+string source_topic
+string frame_id
+string clock_domain
+builtin_interfaces/Time observed_at
+float32 ttl_seconds
+float32 confidence
+geometry_msgs/PoseWithCovariance pose
+string result_code
