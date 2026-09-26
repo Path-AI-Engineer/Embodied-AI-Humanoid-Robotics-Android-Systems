@@ -77,7 +77,7 @@ class Probe(Node):
 
     def on_command(self, command):
         self.commands.append(command)
-        if abs(command.angular.z) > 0.02:
+        if abs(command.linear.x) > 0.02 or abs(command.angular.z) > 0.02:
             self.keepalive = False
 
     def keepalive_zero(self):
@@ -129,7 +129,7 @@ class Probe(Node):
         handle = accepted.result()
         assert handle.accepted, f"{name} rejected"
         finished = handle.get_result_async()
-        self.until(lambda: finished.done())
+        self.until(lambda: finished.done(), seconds=timeout + 3.0)
         result = finished.result().result
         assert result.completed and result.result_code == "OK", (
             name,
@@ -138,7 +138,7 @@ class Probe(Node):
         )
         return result.reason
 
-    def arm_for_alignment(self):
+    def arm_for_motion(self):
         deadline = time.monotonic() + 5.0
         while time.monotonic() < deadline:
             self.arm.publish(Bool(data=True))
@@ -147,7 +147,7 @@ class Probe(Node):
                 self.keepalive = True
                 self.keepalive_zero()
                 return
-        raise AssertionError("operator arm failed before alignment")
+        raise AssertionError("operator arm failed before motion")
 
 
 def main():
@@ -157,6 +157,15 @@ def main():
         node.until(lambda: node.action.server_is_ready())
         node.until(lambda: len(node.catalog) == 10)
         node.until(lambda: any(e.entity_id == TARGET for e in node.entities))
+        node.until(
+            lambda: node.states
+            and node.states[-1].mode == "SAFE_IDLE"
+            and any(
+                e.entity_id == "obstacle/front" and e.pose.pose.position.x >= 0.8
+                for e in node.entities[-30:]
+            ),
+            seconds=20,
+        )
         node.until(
             lambda: any(d.mission_id == MISSION and d.allowed for d in node.decisions)
         )
@@ -170,13 +179,21 @@ def main():
         ):
             passed[skill] = node.invoke(skill)
         node.until(lambda: bool(node.odometry))
-        node.arm_for_alignment()
+        node.arm_for_motion()
+        passed["navigate_to"] = node.invoke("navigate_to", timeout=20.0)
+        node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
+        node.arm_for_motion()
         motion_index = len(node.commands)
         passed["align_base"] = node.invoke("align_base", timeout=8.0)
         node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
         assert any(
             abs(command.angular.z) > 0.02 for command in node.commands[motion_index:]
         ), "alignment did not produce an authorized angular command"
+        node.arm_for_motion()
+        passed["point_at"] = node.invoke("point_at", timeout=10.0)
+        node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
+        node.arm_for_motion()
+        passed["return_home"] = node.invoke("return_home", timeout=25.0)
         passed["safe_stop"] = node.invoke("safe_stop", timeout=2.0)
         print(json.dumps({"skill_catalog": len(node.catalog), "passed": passed}))
     finally:

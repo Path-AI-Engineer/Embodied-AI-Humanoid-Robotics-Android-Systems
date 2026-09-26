@@ -16,14 +16,17 @@ from astra_interfaces.msg import (
     SkillDescriptor,
     SkillFeedback,
 )
+from builtin_interfaces.msg import Duration
+from control_msgs.action import FollowJointTrajectory
 from nav_msgs.msg import Odometry
-from rclpy.action import ActionServer, CancelResponse, GoalResponse
+from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_msgs.msg import Bool
+from trajectory_msgs.msg import JointTrajectoryPoint
 
 from .registry import SKILLS
 
@@ -49,6 +52,7 @@ class SkillServer(Node):
         self.inspected = set()
         self.completed = {}
         self.running = set()
+        self.home = {}
         callbacks = ReentrantCallbackGroup()
         catalog_qos = QoSProfile(
             depth=12,
@@ -104,6 +108,12 @@ class SkillServer(Node):
             execute_callback=self.execute,
             goal_callback=self.accept_goal,
             cancel_callback=self.accept_cancel,
+            callback_group=callbacks,
+        )
+        self.arm_client = ActionClient(
+            self,
+            FollowJointTrajectory,
+            "/arm_controller/follow_joint_trajectory",
             callback_group=callbacks,
         )
         self.publish_catalog()
@@ -296,7 +306,9 @@ class SkillServer(Node):
                     )
                 return "SAFETY_STOP", reason
             if safety != "READY":
-                return "SAFETY_NOT_READY", "safety_or_sensor_heartbeat_missing"
+                self.send_intent(mission_id)
+                time.sleep(0.05)
+                continue
             with self.lock:
                 active = self.safety is not None and self.safety.mode == "ACTIVE"
                 odom_fresh = (
@@ -305,8 +317,13 @@ class SkillServer(Node):
             if not active or not odom_fresh:
                 time.sleep(0.05)
                 continue
-            if self.policy_state(mission_id) != "ALLOWED":
+            policy = self.policy_state(mission_id)
+            if policy == "DENIED":
                 return "POLICY_DENIED", "goal_policy_expired_or_revoked"
+            if policy != "ALLOWED":
+                self.send_intent(mission_id)
+                time.sleep(0.05)
+                continue
             entity = self.fresh_entity(target_id)
             if entity is None:
                 self.send_intent(mission_id)
@@ -345,6 +362,190 @@ class SkillServer(Node):
                 self.send_intent(mission_id, angular=angular)
             time.sleep(0.05)
         return "TIMEOUT", "alignment_deadline_exceeded"
+
+    def navigate_base(self, goal_handle, deadline):
+        request = goal_handle.request
+        mission_id = request.mission_id
+        with self.lock:
+            start = self.odom
+            start_fresh = start is not None and time.monotonic() - self.odom_wall <= 0.5
+            if request.skill_name == "navigate_to" and start_fresh:
+                q = start.pose.pose.orientation
+                start_yaw = math.atan2(
+                    2 * (q.w * q.z + q.x * q.y),
+                    1 - 2 * (q.y * q.y + q.z * q.z),
+                )
+                self.home[mission_id] = (
+                    start.pose.pose.position.x,
+                    start.pose.pose.position.y,
+                    start_yaw,
+                )
+            home = self.home.get(mission_id)
+        if not start_fresh or home is None:
+            return "STALE_ODOMETRY", "no_fresh_home_pose"
+        if request.skill_name == "navigate_to":
+            target_x = home[0] + 0.28 * math.cos(home[2])
+            target_y = home[1] + 0.28 * math.sin(home[2])
+        else:
+            target_x, target_y = home[:2]
+        settled = 0
+        while time.monotonic() < deadline:
+            if goal_handle.is_cancel_requested:
+                self.zero_intent(mission_id)
+                return "CANCELED", "operator_cancel"
+            policy = self.policy_state(mission_id)
+            if policy == "DENIED":
+                self.zero_intent(mission_id)
+                return "POLICY_DENIED", "goal_policy_expired_or_revoked"
+            if policy != "ALLOWED":
+                self.send_intent(mission_id)
+                time.sleep(0.05)
+                continue
+            safety = self.safety_state()
+            if safety == "STOPPED":
+                self.zero_intent(mission_id)
+                return "SAFETY_STOP", "safety_supervisor_latched_stop"
+            if safety != "READY":
+                self.send_intent(mission_id)
+                time.sleep(0.05)
+                continue
+            with self.lock:
+                odom = self.odom
+                fresh = odom is not None and time.monotonic() - self.odom_wall <= 0.5
+                active = self.safety is not None and self.safety.mode == "ACTIVE"
+            if not fresh:
+                self.zero_intent(mission_id)
+                return "STALE_ODOMETRY", "odom_heartbeat_missing"
+            if not active:
+                self.send_intent(mission_id)
+                time.sleep(0.05)
+                continue
+            x = odom.pose.pose.position.x
+            y = odom.pose.pose.position.y
+            dx, dy = target_x - x, target_y - y
+            distance = math.hypot(dx, dy)
+            q = odom.pose.pose.orientation
+            yaw = math.atan2(
+                2 * (q.w * q.z + q.x * q.y),
+                1 - 2 * (q.y * q.y + q.z * q.z),
+            )
+            if distance <= 0.045:
+                orientation_error = (
+                    math.atan2(math.sin(home[2] - yaw), math.cos(home[2] - yaw))
+                    if request.skill_name == "return_home"
+                    else 0.0
+                )
+                if abs(orientation_error) > 0.08:
+                    self.send_intent(
+                        mission_id,
+                        angular=max(-0.5, min(0.5, 1.4 * orientation_error)),
+                    )
+                    settled = 0
+                    time.sleep(0.05)
+                    continue
+                self.send_intent(mission_id)
+                settled += 1
+                if settled >= 3:
+                    self.zero_intent(mission_id)
+                    return (
+                        "OK",
+                        "odometry_station_reached"
+                        if request.skill_name == "navigate_to"
+                        else "odometry_home_reached",
+                    )
+                time.sleep(0.05)
+                continue
+            settled = 0
+            bearing = math.atan2(dy, dx)
+            error = math.atan2(math.sin(bearing - yaw), math.cos(bearing - yaw))
+            obstacle = self.fresh_entity("obstacle/front")
+            if obstacle is None or obstacle.pose.pose.position.x < 0.85:
+                self.send_intent(mission_id)
+                return "OBSTACLE_OR_STALE_LIDAR", "front_clearance_not_verified"
+            angular = max(-0.55, min(0.55, 1.5 * error))
+            linear = min(0.14, 0.7 * distance) if abs(error) < 0.18 else 0.0
+            self.send_intent(mission_id, linear=linear, angular=angular)
+            time.sleep(0.05)
+        self.send_intent(mission_id)
+        return "TIMEOUT", "navigation_deadline_exceeded"
+
+    def point_at(self, goal_handle, deadline):
+        request = goal_handle.request
+        mission_id = request.mission_id
+        entity = self.fresh_entity(request.target_id)
+        if entity is None:
+            return "STALE_TARGET", "point_requires_fresh_rgbd_fact"
+        if self.policy_state(mission_id) != "ALLOWED":
+            return "POLICY_DENIED", "goal_policy_expired_or_revoked"
+        arm_deadline = min(deadline, time.monotonic() + 1.0)
+        while time.monotonic() < arm_deadline:
+            with self.lock:
+                active = self.safety is not None and self.safety.mode == "ACTIVE"
+            if active and self.safety_state() == "READY":
+                break
+            if self.safety_state() == "STOPPED":
+                return "SAFETY_STOP", "arm_authorization_not_available"
+            self.send_intent(mission_id)
+            time.sleep(0.05)
+        else:
+            return "SAFETY_NOT_READY", "operator_arm_required_for_point"
+        if not self.arm_client.wait_for_server(timeout_sec=1.0):
+            self.zero_intent(mission_id)
+            return "CONTROL_ADAPTER_UNAVAILABLE", "arm_controller_action_missing"
+        horizontal = entity.pose.pose.position.x
+        depth = entity.pose.pose.position.z
+        if not math.isfinite(horizontal) or not math.isfinite(depth) or depth <= 0.1:
+            self.zero_intent(mission_id)
+            return "INVALID_TARGET", "rgbd_pose_out_of_bounds"
+        bearing = max(-0.4, min(0.4, math.atan2(horizontal, depth)))
+        command = FollowJointTrajectory.Goal()
+        command.trajectory.joint_names = [f"arm_joint_{joint}" for joint in range(1, 7)]
+        point = JointTrajectoryPoint()
+        point.positions = [bearing, -0.25, 0.45, 0.0, 0.0, 0.0]
+        point.time_from_start = Duration(sec=2)
+        command.trajectory.points = [point]
+        accepted = self.arm_client.send_goal_async(command)
+        controller_goal = None
+        result = None
+        while time.monotonic() < deadline:
+            if goal_handle.is_cancel_requested:
+                if controller_goal is not None:
+                    controller_goal.cancel_goal_async()
+                self.zero_intent(mission_id)
+                return "CANCELED", "operator_cancel"
+            if (
+                self.policy_state(mission_id) != "ALLOWED"
+                or self.safety_state() != "READY"
+            ):
+                if controller_goal is not None:
+                    controller_goal.cancel_goal_async()
+                self.zero_intent(mission_id)
+                return "SAFETY_STOP", "point_policy_or_safety_revoked"
+            with self.lock:
+                active = self.safety is not None and self.safety.mode == "ACTIVE"
+            if not active or self.fresh_entity(request.target_id) is None:
+                if controller_goal is not None:
+                    controller_goal.cancel_goal_async()
+                self.zero_intent(mission_id)
+                return "STALE_TARGET", "point_target_or_arm_state_lost"
+            self.send_intent(mission_id)
+            if controller_goal is None and accepted.done():
+                controller_goal = accepted.result()
+                if not controller_goal.accepted:
+                    self.zero_intent(mission_id)
+                    return "CONTROL_REJECTED", "arm_trajectory_rejected"
+                result = controller_goal.get_result_async()
+            if result is not None and result.done():
+                outcome = result.result().result
+                self.zero_intent(mission_id)
+                if outcome.error_code == 0:
+                    return "OK", "bounded_arm_trajectory_completed"
+                return "CONTROL_FAILED", f"arm_result_{outcome.error_code}"
+            time.sleep(0.05)
+        if controller_goal is not None:
+            controller_goal.cancel_goal_async()
+        self.zero_intent(mission_id)
+        return "TIMEOUT", "arm_trajectory_deadline_exceeded"
 
     def execute(self, goal_handle):
         request = goal_handle.request
@@ -392,6 +593,10 @@ class SkillServer(Node):
         deadline = time.monotonic() + request.timeout_seconds
         if request.skill_name == "align_base":
             return self.align_base(goal_handle, deadline)
+        if request.skill_name in {"navigate_to", "return_home"}:
+            return self.navigate_base(goal_handle, deadline)
+        if request.skill_name == "point_at":
+            return self.point_at(goal_handle, deadline)
         while time.monotonic() < deadline:
             if goal_handle.is_cancel_requested:
                 return "CANCELED", "operator_cancel"

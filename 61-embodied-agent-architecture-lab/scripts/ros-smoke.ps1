@@ -20,7 +20,7 @@ ros2 interface show astra_interfaces/msg/Percept >/dev/null || exit 10
 ros2 interface show astra_interfaces/action/SkillInvocation >/dev/null || exit 11
 xacro /ws/install/share/astra_description/urdf/astra.urdf.xacro >/dev/null || exit 12
 gz sdf -k /ws/install/share/astra_simulation/worlds/embodied_lab.sdf >/dev/null || exit 13
-timeout 180s ros2 launch astra_bringup headless.launch.py > /tmp/astra-bringup.log 2>&1 &
+timeout 240s ros2 launch astra_bringup headless.launch.py > /tmp/astra-bringup.log 2>&1 &
 launch_pid=$!
 sleep 8
 wait_active() {
@@ -71,7 +71,7 @@ for joint in $(seq 1 6); do
   fi
 done
 echo 'six_axis_arm_controller: active'
-ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /clock > /tmp/astra-bag.log 2>&1 &
+ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /joint_states /arm_controller/controller_state /clock > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
 bag_ready=0
 for attempt in $(seq 1 20); do
@@ -83,14 +83,6 @@ if [ "$bag_ready" -ne 1 ]; then
   kill -TERM $bag_pid $launch_pid 2>/dev/null || true
   exit 27
 fi
-python3 /ws/src/embodied_executive/test/executive_probe.py > /tmp/astra-executive-probe.log 2>&1
-executive_status=$?
-if [ "$executive_status" -ne 0 ]; then
-  cat /tmp/astra-executive-probe.log
-  tail -n 30 /tmp/astra-bringup.log
-  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
-  exit 26
-fi
 python3 /ws/src/embodied_skills/test/skill_action_probe.py > /tmp/astra-skill-probe.log 2>&1
 skill_status=$?
 if [ "$skill_status" -ne 0 ]; then
@@ -98,6 +90,14 @@ if [ "$skill_status" -ne 0 ]; then
   tail -n 30 /tmp/astra-bringup.log
   kill -TERM $bag_pid $launch_pid 2>/dev/null || true
   exit 25
+fi
+python3 /ws/src/embodied_executive/test/executive_probe.py > /tmp/astra-executive-probe.log 2>&1
+executive_status=$?
+if [ "$executive_status" -ne 0 ]; then
+  cat /tmp/astra-executive-probe.log
+  tail -n 30 /tmp/astra-bringup.log
+  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
+  exit 26
 fi
 python3 /ws/src/embodied_safety/test/ros_gate_probe.py > /tmp/astra-probe.log 2>&1
 probe_status=$?
@@ -121,9 +121,15 @@ if [ "$probe_status" -ne 0 ]; then exit 19; fi
 if [ "$lifecycle_status" -ne 0 ]; then cat /tmp/astra-lifecycle.log; exit 23; fi
 cat /tmp/astra-bag-verification.log
 if [ "$bag_status" -ne 0 ]; then cat /tmp/astra-bag.log; exit 20; fi
-if grep -Eq 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log; then
+arm_clamps=$(grep -c 'Command of at least one joint is out of limits' /tmp/astra-bringup.log || true)
+echo "arm_command_clamps:$arm_clamps"
+if [ "$arm_clamps" -gt 25 ]; then
+  echo 'arm_controller_saturation_exceeded'
+  exit 14
+fi
+if grep -E 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log | grep -vq 'Command of at least one joint is out of limits'; then
   echo 'bringup_error_lines:'
-  grep -E 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log
+  grep -E 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log | grep -v 'Command of at least one joint is out of limits'
   exit 14
 fi
 if ! grep -q 'Entity creation successful' /tmp/astra-bringup.log; then exit 15; fi

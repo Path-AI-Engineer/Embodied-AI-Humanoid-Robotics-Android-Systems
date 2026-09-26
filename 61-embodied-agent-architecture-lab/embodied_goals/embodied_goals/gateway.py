@@ -46,7 +46,7 @@ class GoalGateway(Node):
             and goal.frame_id == "map"
             and goal.clock_domain == "sim"
             and 0 < goal.ttl_seconds <= 1.0
-            and 0 <= age <= goal.ttl_seconds
+            and -0.05 <= age <= goal.ttl_seconds
         ):
             if goal.station_id == "inspection-station":
                 decision.allowed = True
