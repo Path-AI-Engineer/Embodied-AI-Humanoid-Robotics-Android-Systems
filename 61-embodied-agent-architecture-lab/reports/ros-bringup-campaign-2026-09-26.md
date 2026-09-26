@@ -76,3 +76,22 @@ It contains 660 lidar scans, 1,000 RGB frames, 998 depth frames, 3,295 odometry
 messages, `/clock`, one `/tf_static` sample, and the mission/safety topics.
 Capture and offline invariant checks passed; sensor-driven ROS replay and
 decision equivalence remain unverified.
+
+## Sensor-driven replay
+
+The retained bag was replayed twice into fresh lifecycle-managed lidar,
+RGB-D and world-model processes using `scripts/ros-sensor-replay.ps1`.
+Both runs produced new `object-00` and `obstacle/front` percepts and world facts
+from **raw sensor topics**, not from replaying the original fact topics.
+The second run retained its derived rosbag2, player log and verifier output in
+ignored `reports/local/sensor-replay/20260926-143055-cc96ef6f/`.
+
+| Replay | Object percepts and facts | Obstacle percepts and facts | Result |
+| --- | ---: | ---: | --- |
+| First | 581 | 660 | PASS |
+| Second | 548 | 660 | PASS |
+
+The different RGB-D count is evidence that this transport-level replay is
+**not exact decision-equivalent**. Scheduling and frame pairing must be
+controlled before claiming deterministic ROS replay. Neither replay exercised
+the mission executive or motor path.
