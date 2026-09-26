@@ -16,8 +16,6 @@ from astra_interfaces.msg import (
     SkillDescriptor,
     SkillFeedback,
 )
-from builtin_interfaces.msg import Duration
-from control_msgs.action import FollowJointTrajectory
 from nav_msgs.msg import Odometry
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
@@ -26,7 +24,6 @@ from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import String
 from std_msgs.msg import Bool
-from trajectory_msgs.msg import JointTrajectoryPoint
 
 from .registry import SKILLS
 
@@ -112,8 +109,8 @@ class SkillServer(Node):
         )
         self.arm_client = ActionClient(
             self,
-            FollowJointTrajectory,
-            "/arm_controller/follow_joint_trajectory",
+            SkillInvocation,
+            "/astra/control/point_at",
             callback_group=callbacks,
         )
         self.publish_catalog()
@@ -389,6 +386,7 @@ class SkillServer(Node):
         else:
             target_x, target_y = home[:2]
         settled = 0
+        lidar_lost_at = None
         while time.monotonic() < deadline:
             if goal_handle.is_cancel_requested:
                 self.zero_intent(mission_id)
@@ -459,9 +457,18 @@ class SkillServer(Node):
             bearing = math.atan2(dy, dx)
             error = math.atan2(math.sin(bearing - yaw), math.cos(bearing - yaw))
             obstacle = self.fresh_entity("obstacle/front")
-            if obstacle is None or obstacle.pose.pose.position.x < 0.85:
+            if obstacle is None:
                 self.send_intent(mission_id)
-                return "OBSTACLE_OR_STALE_LIDAR", "front_clearance_not_verified"
+                if lidar_lost_at is None:
+                    lidar_lost_at = time.monotonic()
+                if time.monotonic() - lidar_lost_at >= 0.5:
+                    return "STALE_LIDAR", "front_clearance_fact_expired"
+                time.sleep(0.05)
+                continue
+            lidar_lost_at = None
+            if obstacle.pose.pose.position.x < 0.85:
+                self.send_intent(mission_id)
+                return "OBSTACLE", "front_clearance_below_protective_distance"
             angular = max(-0.55, min(0.55, 1.5 * error))
             linear = min(0.14, 0.7 * distance) if abs(error) < 0.18 else 0.0
             self.send_intent(mission_id, linear=linear, angular=angular)
@@ -491,56 +498,39 @@ class SkillServer(Node):
             return "SAFETY_NOT_READY", "operator_arm_required_for_point"
         if not self.arm_client.wait_for_server(timeout_sec=1.0):
             self.zero_intent(mission_id)
-            return "CONTROL_ADAPTER_UNAVAILABLE", "arm_controller_action_missing"
-        horizontal = entity.pose.pose.position.x
-        depth = entity.pose.pose.position.z
-        if not math.isfinite(horizontal) or not math.isfinite(depth) or depth <= 0.1:
-            self.zero_intent(mission_id)
-            return "INVALID_TARGET", "rgbd_pose_out_of_bounds"
-        bearing = max(-0.4, min(0.4, math.atan2(horizontal, depth)))
-        command = FollowJointTrajectory.Goal()
-        command.trajectory.joint_names = [f"arm_joint_{joint}" for joint in range(1, 7)]
-        point = JointTrajectoryPoint()
-        point.positions = [bearing, -0.25, 0.45, 0.0, 0.0, 0.0]
-        point.time_from_start = Duration(sec=2)
-        command.trajectory.points = [point]
-        accepted = self.arm_client.send_goal_async(command)
+            return "CONTROL_ADAPTER_UNAVAILABLE", "arm_gateway_action_missing"
+        forwarded = SkillInvocation.Goal()
+        forwarded.schema_version = request.schema_version
+        forwarded.mission_id = request.mission_id
+        forwarded.skill_name = request.skill_name
+        forwarded.target_id = request.target_id
+        forwarded.frame_id = request.frame_id
+        forwarded.clock_domain = request.clock_domain
+        forwarded.requested_at = self.get_clock().now().to_msg()
+        forwarded.timeout_seconds = min(request.timeout_seconds, 10.0)
+        accepted = self.arm_client.send_goal_async(forwarded)
         controller_goal = None
         result = None
         while time.monotonic() < deadline:
+            if controller_goal is None and accepted.done():
+                controller_goal = accepted.result()
+                if not controller_goal.accepted:
+                    self.zero_intent(mission_id)
+                    return "CONTROL_REJECTED", "arm_gateway_rejected"
+                result = controller_goal.get_result_async()
+            if result is not None and result.done():
+                outcome = result.result().result
+                self.send_intent(mission_id)
+                return outcome.result_code, outcome.reason
             if goal_handle.is_cancel_requested:
                 if controller_goal is not None:
                     controller_goal.cancel_goal_async()
                 self.zero_intent(mission_id)
                 return "CANCELED", "operator_cancel"
-            if (
-                self.policy_state(mission_id) != "ALLOWED"
-                or self.safety_state() != "READY"
-            ):
-                if controller_goal is not None:
-                    controller_goal.cancel_goal_async()
-                self.zero_intent(mission_id)
-                return "SAFETY_STOP", "point_policy_or_safety_revoked"
-            with self.lock:
-                active = self.safety is not None and self.safety.mode == "ACTIVE"
-            if not active or self.fresh_entity(request.target_id) is None:
-                if controller_goal is not None:
-                    controller_goal.cancel_goal_async()
-                self.zero_intent(mission_id)
-                return "STALE_TARGET", "point_target_or_arm_state_lost"
+            # The independent gateway owns ongoing policy, safety and target
+            # checks. A completed gateway result can legitimately arrive after
+            # it has disarmed the base, so this relay must not reinterpret it.
             self.send_intent(mission_id)
-            if controller_goal is None and accepted.done():
-                controller_goal = accepted.result()
-                if not controller_goal.accepted:
-                    self.zero_intent(mission_id)
-                    return "CONTROL_REJECTED", "arm_trajectory_rejected"
-                result = controller_goal.get_result_async()
-            if result is not None and result.done():
-                outcome = result.result().result
-                self.zero_intent(mission_id)
-                if outcome.error_code == 0:
-                    return "OK", "bounded_arm_trajectory_completed"
-                return "CONTROL_FAILED", f"arm_result_{outcome.error_code}"
             time.sleep(0.05)
         if controller_goal is not None:
             controller_goal.cancel_goal_async()

@@ -4,6 +4,7 @@ import json
 import time
 
 import rclpy
+from astra_interfaces.action import SkillInvocation
 from astra_interfaces.msg import (
     ControlIntent,
     EntityState,
@@ -13,6 +14,7 @@ from astra_interfaces.msg import (
     SafetyState,
 )
 from geometry_msgs.msg import Twist
+from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
@@ -35,6 +37,7 @@ class Probe(Node):
         self.recover = self.create_publisher(Bool, "/astra/safety/recovery", 1)
         self.intent = self.create_publisher(ControlIntent, "/astra/control/intent", 5)
         self.goals = self.create_publisher(GoalRequest, "/astra/goals/request", 4)
+        self.arm_action = ActionClient(self, SkillInvocation, "/astra/control/point_at")
         state_qos = QoSProfile(
             depth=1,
             reliability=ReliabilityPolicy.RELIABLE,
@@ -154,6 +157,28 @@ def main():
         node.until(lambda: any(e.entity_id == "obstacle/front" for e in node.entities))
         node.until(lambda: any(p.entity_id == "object-00" for p in node.percepts))
         node.until(lambda: any(e.entity_id == "object-00" for e in node.entities))
+        target = next(e for e in node.entities if e.entity_id == "object-00")
+        target_lifetime = (
+            target.valid_until.sec
+            + target.valid_until.nanosec / 10**9
+            - target.observed_at.sec
+            - target.observed_at.nanosec / 10**9
+        )
+        assert 0.49 <= target_lifetime <= 0.51, target_lifetime
+        node.until(lambda: node.arm_action.server_is_ready())
+        unauthorized = SkillInvocation.Goal()
+        unauthorized.schema_version = "astra.skill-invocation.v1"
+        unauthorized.mission_id = "unauthorized-probe"
+        unauthorized.skill_name = "point_at"
+        unauthorized.target_id = "object-00"
+        unauthorized.frame_id = "map"
+        unauthorized.clock_domain = "sim"
+        unauthorized.requested_at = node.get_clock().now().to_msg()
+        unauthorized.timeout_seconds = 3.0
+        unauthorized_sent = node.arm_action.send_goal_async(unauthorized)
+        node.until(lambda: unauthorized_sent.done())
+        unauthorized_handle = unauthorized_sent.result()
+        assert not unauthorized_handle.accepted, "unapproved arm action was admitted"
         node.arm.publish(Bool(data=True))
         for _ in range(5):
             rclpy.spin_once(node, timeout_sec=0.05)
@@ -226,6 +251,7 @@ def main():
                     "estop_latch": "verified",
                     "explicit_recovery": "verified",
                     "speed_limit": "verified",
+                    "arm_gateway_policy_bypass": "rejected",
                 }
             )
         )

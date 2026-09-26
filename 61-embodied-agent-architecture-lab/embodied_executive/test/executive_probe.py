@@ -87,16 +87,17 @@ def main():
         assert node.states, "safety state publisher not discovered"
         deadline = time.monotonic() + 90
         next_goal = 0.0
+        armed_stages = set()
         while time.monotonic() < deadline and "SUCCEEDED" not in node.events:
             if "RUNNING" not in node.events and time.monotonic() >= next_goal:
                 node.publish_goal()
                 next_goal = time.monotonic() + 0.15
-            if (
-                node.events.count("SKILL_OK") in {3, 4, 5, 8}
-                and node.states
-                and node.states[-1].mode == "SAFE_IDLE"
-            ):
-                node.operator_arm()
+            stage = node.events.count("SKILL_OK")
+            if stage in {3, 4, 5, 8} and stage not in armed_stages and node.states:
+                if node.states[-1].mode == "SAFE_IDLE":
+                    node.operator_arm()
+                elif node.states[-1].mode == "ACTIVE":
+                    armed_stages.add(stage)
             rclpy.spin_once(node, timeout_sec=0.05)
         assert "RUNNING" in node.events, node.events
         assert node.events.count("SKILL_OK") == 10, node.events

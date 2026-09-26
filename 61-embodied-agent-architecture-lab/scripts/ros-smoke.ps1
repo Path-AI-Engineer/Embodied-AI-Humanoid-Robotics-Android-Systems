@@ -95,6 +95,7 @@ python3 /ws/src/embodied_executive/test/executive_probe.py > /tmp/astra-executiv
 executive_status=$?
 if [ "$executive_status" -ne 0 ]; then
   cat /tmp/astra-executive-probe.log
+  grep -E 'arm_control_gateway|mission_executive|safety_gateway.*(STOP|arm|recovery)' /tmp/astra-bringup.log | tail -n 30 || true
   tail -n 30 /tmp/astra-bringup.log
   kill -TERM $bag_pid $launch_pid 2>/dev/null || true
   exit 26

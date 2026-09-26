@@ -67,7 +67,12 @@ class WorldModel(LifecycleNode):
         now_ns = self.get_clock().now().nanoseconds
         if not -0.05 <= (now_ns - observed_ns) / 10**9 <= percept.ttl_seconds:
             return
-        valid_ns = observed_ns + int(percept.ttl_seconds * 10**9)
+        # The red fiducial is fixed in this synthetic world. Percept intake
+        # still requires a <=250 ms source sample, while the derived entity
+        # uses the catalogued 500 ms world-fact lifetime to absorb one missed
+        # RGB-D frame. Moving targets must not inherit this longer lifetime.
+        fact_ttl = 0.5 if percept.entity_id == "object-00" else percept.ttl_seconds
+        valid_ns = observed_ns + int(fact_ttl * 10**9)
         entity = EntityState()
         entity.schema_version = "astra.entity-state.v1"
         entity.entity_id = percept.entity_id

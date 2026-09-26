@@ -23,4 +23,5 @@ target_link_libraries(safety_gateway PRIVATE
 target_compile_features(safety_gateway PUBLIC cxx_std_17)
 target_compile_options(safety_gateway PRIVATE -Wall -Wextra -Wpedantic)
 install(TARGETS safety_gateway DESTINATION lib/${PROJECT_NAME})
+install(PROGRAMS src/arm_control_gateway.py DESTINATION lib/${PROJECT_NAME})
 ament_package()
