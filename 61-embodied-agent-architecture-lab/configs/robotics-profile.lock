@@ -13,6 +13,9 @@
     "ros-lyrical-geometry-msgs": "5.9.3-1resolute.20260915.045122",
     "ros-lyrical-ros-gz-bridge": "3.0.10-1resolute.20260915.142616",
     "ros-lyrical-ros2-control": "6.10.1-1resolute.20260915.111302",
+    "ros-lyrical-gz-ros2-control": "3.0.9-1resolute.20260915.105054",
+    "ros-lyrical-joint-trajectory-controller": "6.9.0-1resolute.20260915.151614",
+    "ros-lyrical-joint-state-broadcaster": "6.9.0-1resolute.20260915.110533",
     "ros-lyrical-behaviortree-cpp": "4.10.0-1resolute.20260915.080455"
   },
   "available_not_integrated": {

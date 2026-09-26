@@ -4,7 +4,8 @@ from pathlib import Path
 
 from ament_index_python.packages import get_package_share_directory
 from launch import LaunchDescription
-from launch.actions import ExecuteProcess, IncludeLaunchDescription
+from launch.actions import ExecuteProcess, IncludeLaunchDescription, RegisterEventHandler
+from launch.event_handlers import OnProcessExit
 from launch.launch_description_sources import PythonLaunchDescriptionSource
 from launch_ros.actions import LifecycleNode, Node
 
@@ -17,6 +18,9 @@ def generate_launch_description():
     world = sim_share / "worlds" / "embodied_lab.sdf"
     model = description_share / "urdf" / "astra.urdf.xacro"
     robot_xml = __import__("subprocess").check_output(["xacro", str(model)], text=True)
+    spawn_robot = ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen")
+    start_joint_states = Node(package="controller_manager", executable="spawner", arguments=["joint_state_broadcaster", "--controller-manager", "/controller_manager", "--controller-manager-timeout", "30"], output="screen")
+    start_arm_controller = Node(package="controller_manager", executable="spawner", arguments=["arm_controller", "--controller-manager", "/controller_manager", "--controller-manager-timeout", "30", "--param-file", str(description_share / "config" / "controllers.yaml")], output="screen")
     return LaunchDescription([
         IncludeLaunchDescription(PythonLaunchDescriptionSource(str(gz_share / "launch" / "gz_sim.launch.py")), launch_arguments={"gz_args": f"-r -s {world}"}.items()),
         Node(package="robot_state_publisher", executable="robot_state_publisher", namespace="astra", parameters=[{"robot_description": robot_xml, "use_sim_time": True}]),
@@ -28,5 +32,6 @@ def generate_launch_description():
         Node(package="embodied_goals", executable="goal_gateway", name="goal_gateway", parameters=[{"use_sim_time": True}], output="screen"),
         Node(package="embodied_skills", executable="skill_server", name="skill_server", parameters=[{"use_sim_time": True}], output="screen"),
         Node(package="embodied_executive", executable="mission_executive", name="mission_executive", parameters=[{"use_sim_time": True}], output="screen"),
-        ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen"),
+        spawn_robot,
+        RegisterEventHandler(OnProcessExit(target_action=spawn_robot, on_exit=[start_joint_states, start_arm_controller])),
     ])

@@ -145,6 +145,12 @@ class SkillStep final : public BT::StatefulActionNode {
     const auto wrapped = result_.get();
     const bool success = wrapped.code == rclcpp_action::ResultCode::SUCCEEDED &&
                          wrapped.result && wrapped.result->completed && wrapped.result->result_code == "OK";
+    if (!success) {
+      RCLCPP_WARN(node_->get_logger(), "mission=%s skill=%s failed: action_code=%d result_code=%s",
+                  mission_.c_str(), getInput<std::string>("skill").value().c_str(),
+                  static_cast<int>(wrapped.code),
+                  wrapped.result ? wrapped.result->result_code.c_str() : "NO_RESULT");
+    }
     node_->event(mission_, success ? "SKILL_OK" : "SKILL_FAILED");
     return success ? BT::NodeStatus::SUCCESS : BT::NodeStatus::FAILURE;
   }

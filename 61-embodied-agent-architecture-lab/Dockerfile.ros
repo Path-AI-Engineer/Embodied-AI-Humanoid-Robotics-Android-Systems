@@ -11,6 +11,9 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-lyrical-ros-gz-sim \
     ros-lyrical-ros-gz-bridge \
     ros-lyrical-ros2-control \
+    ros-lyrical-gz-ros2-control=3.0.9-1resolute.20260915.105054 \
+    ros-lyrical-joint-trajectory-controller=6.9.0-1resolute.20260915.151614 \
+    ros-lyrical-joint-state-broadcaster=6.9.0-1resolute.20260915.110533 \
     ros-lyrical-behaviortree-cpp \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*

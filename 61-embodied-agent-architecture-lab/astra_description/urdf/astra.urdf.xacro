@@ -1,5 +1,6 @@
 <?xml version="1.0"?>
 <robot xmlns:xacro="http://www.ros.org/wiki/xacro" name="astra_synthetic_v1">
+  <xacro:arg name="controllers_file" default="$(find astra_description)/config/controllers.yaml"/>
   <xacro:macro name="simple_link" params="name mass sx sy sz">
     <link name="${name}">
       <visual><geometry><box size="${sx} ${sy} ${sz}"/></geometry></visual>
@@ -41,6 +42,28 @@
   <joint name="lidar_mount" type="fixed"><parent link="base_link"/><child link="lidar_link"/><origin xyz="0.30 0 0.18"/></joint>
   <link name="imu_link"/><joint name="imu_mount" type="fixed"><parent link="base_link"/><child link="imu_link"/></joint>
   <link name="bumper_link"/><joint name="bumper_mount" type="fixed"><parent link="base_link"/><child link="bumper_link"/><origin xyz="0.29 0 0"/></joint>
+  <xacro:macro name="arm_control" params="number">
+    <joint name="arm_joint_${number}">
+      <command_interface name="position"><param name="min">-1.5</param><param name="max">1.5</param></command_interface>
+      <state_interface name="position"><param name="initial_value">0.0</param></state_interface>
+      <state_interface name="velocity"/>
+    </joint>
+  </xacro:macro>
+  <ros2_control name="AstraArmSim" type="system">
+    <hardware><plugin>gz_ros2_control/GazeboSimSystem</plugin></hardware>
+    <xacro:arm_control number="1"/>
+    <xacro:arm_control number="2"/>
+    <xacro:arm_control number="3"/>
+    <xacro:arm_control number="4"/>
+    <xacro:arm_control number="5"/>
+    <xacro:arm_control number="6"/>
+  </ros2_control>
+  <gazebo>
+    <plugin filename="libgz_ros2_control-system.so" name="gz_ros2_control::GazeboSimROS2ControlPlugin">
+      <parameters>$(arg controllers_file)</parameters>
+      <ros><remapping>/robot_description:=/astra/robot_description</remapping></ros>
+    </plugin>
+  </gazebo>
   <gazebo reference="camera_link"><sensor name="head_rgbd" type="rgbd_camera"><pose>0.08 0 0 0 0 0</pose><always_on>true</always_on><update_rate>15</update_rate><topic>/astra/sensors/rgbd</topic><gz_frame_id>camera_optical_frame</gz_frame_id><camera><horizontal_fov>1.047</horizontal_fov><image><width>320</width><height>240</height><format>R8G8B8</format></image><clip><near>0.1</near><far>8.0</far></clip></camera></sensor></gazebo>
   <gazebo reference="lidar_link"><sensor name="lidar_2d" type="gpu_lidar"><always_on>true</always_on><update_rate>10</update_rate><topic>/astra/sensors/scan</topic><lidar><scan><horizontal><samples>360</samples><min_angle>-3.14159</min_angle><max_angle>3.14159</max_angle></horizontal></scan><range><min>0.1</min><max>10.0</max></range></lidar></sensor></gazebo>
   <gazebo reference="imu_link"><sensor name="imu" type="imu"><always_on>true</always_on><update_rate>50</update_rate><topic>/astra/sensors/imu</topic></sensor></gazebo>

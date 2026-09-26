@@ -41,6 +41,36 @@ wait_state() {
 if ! wait_active /lidar_perception; then echo 'lidar lifecycle activation timed out' >&2; exit 21; fi
 if ! wait_active /camera_perception; then echo 'camera lifecycle activation timed out' >&2; exit 24; fi
 if ! wait_active /world_model; then echo 'world lifecycle activation timed out' >&2; exit 22; fi
+controllers_ready=0
+for attempt in $(seq 1 30); do
+  controller_state=$(timeout 5s ros2 control list_controllers -c /controller_manager 2>/dev/null || true)
+  if echo "$controller_state" | grep -q 'joint_state_broadcaster.*active'; then
+    if ! echo "$controller_state" | grep -q 'arm_controller.*active'; then sleep 1; continue; fi
+    controllers_ready=1
+    break
+  fi
+  sleep 1
+done
+if [ "$controllers_ready" -ne 1 ]; then
+  printf 'arm_controllers_inactive:%s\n' "$controller_state"
+  tail -n 40 /tmp/astra-bringup.log
+  kill -TERM $launch_pid 2>/dev/null || true
+  exit 28
+fi
+interfaces=''
+for attempt in $(seq 1 10); do
+  interfaces=$(timeout 5s ros2 control list_hardware_interfaces -c /controller_manager 2>/dev/null || true)
+  if echo "$interfaces" | grep -q 'arm_joint_6/position'; then break; fi
+  sleep 1
+done
+for joint in $(seq 1 6); do
+  if ! echo "$interfaces" | grep -Eq "arm_joint_${joint}/position[[:space:]]+\[claimed\]"; then
+    printf 'arm_joint_%s_position_unclaimed\n' "$joint"
+    kill -TERM $launch_pid 2>/dev/null || true
+    exit 29
+  fi
+done
+echo 'six_axis_arm_controller: active'
 ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /clock > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
 bag_ready=0
@@ -91,7 +121,11 @@ if [ "$probe_status" -ne 0 ]; then exit 19; fi
 if [ "$lifecycle_status" -ne 0 ]; then cat /tmp/astra-lifecycle.log; exit 23; fi
 cat /tmp/astra-bag-verification.log
 if [ "$bag_status" -ne 0 ]; then cat /tmp/astra-bag.log; exit 20; fi
-if grep -Eq 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log; then exit 14; fi
+if grep -Eq 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log; then
+  echo 'bringup_error_lines:'
+  grep -E 'symbol lookup error|process has died|\[ERROR\]' /tmp/astra-bringup.log
+  exit 14
+fi
 if ! grep -q 'Entity creation successful' /tmp/astra-bringup.log; then exit 15; fi
 if ! grep -q 'Robot initialized' /tmp/astra-bringup.log; then exit 16; fi
 if ! grep -q 'Creating GZ->ROS Bridge' /tmp/astra-bringup.log; then exit 17; fi
@@ -99,10 +133,16 @@ echo 'Project 61 ROS/Gazebo and motor safety smoke passed.'
 '@
     for ($runIndex = 1; $runIndex -le $Runs; $runIndex++) {
         Write-Host "  -> Clean ROS/Gazebo bringup $runIndex/$Runs" -ForegroundColor Cyan
-        $output = docker run --rm --memory=4g $image bash -lc $smoke 2>&1
-        if ($LASTEXITCODE -ne 0) {
+        $priorActionPreference = $ErrorActionPreference
+        $ErrorActionPreference = 'Continue'
+        try {
+            $output = docker run --rm --memory=4g $image bash -lc $smoke 2>&1
+            $runExitCode = $LASTEXITCODE
+        }
+        finally { $ErrorActionPreference = $priorActionPreference }
+        if ($runExitCode -ne 0) {
             $output | Out-Host
-            throw "ROS/Gazebo smoke failed on run $runIndex with exit code $LASTEXITCODE."
+            throw "ROS/Gazebo smoke failed on run $runIndex with exit code $runExitCode."
         }
         if ($Runs -eq 1) { $output | Out-Host }
         else {
