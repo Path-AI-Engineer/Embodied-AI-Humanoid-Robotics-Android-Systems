@@ -19,6 +19,7 @@ from rclpy.action import ActionClient
 from rclpy.node import Node
 from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import Image
 from std_msgs.msg import Bool
 
 
@@ -38,6 +39,8 @@ class Probe(Node):
         self.states = []
         self.commands = []
         self.odometry = []
+        self.rgb_frames = 0
+        self.depth_frames = 0
         self.keepalive = False
         self.goals = self.create_publisher(GoalRequest, "/astra/goals/request", 4)
         self.arm = self.create_publisher(Bool, "/astra/safety/arm", 1)
@@ -65,6 +68,19 @@ class Probe(Node):
             self.odometry.append,
             QoSProfile(depth=4, reliability=ReliabilityPolicy.BEST_EFFORT),
         )
+        sensor_qos = QoSProfile(depth=2, reliability=ReliabilityPolicy.BEST_EFFORT)
+        self.create_subscription(
+            Image,
+            "/astra/sensors/rgbd/image",
+            lambda _image: self.count_rgb(),
+            sensor_qos,
+        )
+        self.create_subscription(
+            Image,
+            "/astra/sensors/rgbd/depth_image",
+            lambda _image: self.count_depth(),
+            sensor_qos,
+        )
         self.create_subscription(
             SkillDescriptor,
             "/astra/skills/catalog",
@@ -79,6 +95,12 @@ class Probe(Node):
         self.commands.append(command)
         if abs(command.linear.x) > 0.02 or abs(command.angular.z) > 0.02:
             self.keepalive = False
+
+    def count_rgb(self):
+        self.rgb_frames += 1
+
+    def count_depth(self):
+        self.depth_frames += 1
 
     def keepalive_zero(self):
         if self.keepalive and self.states and self.states[-1].mode == "ACTIVE":
@@ -156,7 +178,16 @@ def main():
     try:
         node.until(lambda: node.action.server_is_ready())
         node.until(lambda: len(node.catalog) == 10)
-        node.until(lambda: any(e.entity_id == TARGET for e in node.entities))
+        try:
+            node.until(
+                lambda: any(e.entity_id == TARGET for e in node.entities),
+                seconds=45,
+            )
+        except AssertionError as exc:
+            raise AssertionError(
+                f"RGB-D target absent: rgb_frames={node.rgb_frames} "
+                f"depth_frames={node.depth_frames} entities={len(node.entities)}"
+            ) from exc
         node.until(
             lambda: node.states
             and node.states[-1].mode == "SAFE_IDLE"
