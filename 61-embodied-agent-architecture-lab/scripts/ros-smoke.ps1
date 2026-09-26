@@ -1,8 +1,16 @@
-param([switch]$SkipBuild, [ValidateRange(1, 12)][int]$Runs = 1)
+param([switch]$SkipBuild, [ValidateRange(1, 12)][int]$Runs = 1, [switch]$CaptureBag)
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
 $image = 'embodied-project61-ros:quality'
+if ($CaptureBag -and $Runs -ne 1) {
+    throw '-CaptureBag requires -Runs 1 so the preserved bag has one unambiguous run.'
+}
+$captureDirectory = $null
+if ($CaptureBag) {
+    $captureDirectory = Join-Path $root ('reports\local\ros-evidence\' + (Get-Date -Format 'yyyyMMdd-HHmmss') + '-' + [guid]::NewGuid().ToString('N').Substring(0, 8))
+    New-Item -ItemType Directory -Path $captureDirectory -Force | Out-Null
+}
 Push-Location $root
 try {
     if (-not $SkipBuild) {
@@ -64,14 +72,20 @@ for attempt in $(seq 1 10); do
   sleep 1
 done
 for joint in $(seq 1 6); do
-  if ! echo "$interfaces" | grep -Eq "arm_joint_${joint}/position[[:space:]]+\[claimed\]"; then
+  if ! echo "$interfaces" | grep -Eq "arm_joint_${joint}/position[[:space:]]+\[available\][[:space:]]+\[claimed\]"; then
     printf 'arm_joint_%s_position_unclaimed\n' "$joint"
+    printf 'hardware_interfaces:%s\n' "$interfaces"
+    tail -n 50 /tmp/astra-bringup.log
     kill -TERM $launch_pid 2>/dev/null || true
     exit 29
   fi
 done
 echo 'six_axis_arm_controller: active'
-ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /joint_states /arm_controller/controller_state /clock > /tmp/astra-bag.log 2>&1 &
+bag_topics='/astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /joint_states /arm_controller/controller_state /clock'
+if [ -n "${ASTRA_EVIDENCE_DIR:-}" ]; then
+  bag_topics="$bag_topics /astra/sensors/scan /astra/sensors/rgbd/image /astra/sensors/rgbd/depth_image /astra/sensors/odom /tf /tf_static"
+fi
+ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics $bag_topics > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
 bag_ready=0
 for attempt in $(seq 1 20); do
@@ -122,6 +136,12 @@ if [ "$probe_status" -ne 0 ]; then exit 19; fi
 if [ "$lifecycle_status" -ne 0 ]; then cat /tmp/astra-lifecycle.log; exit 23; fi
 cat /tmp/astra-bag-verification.log
 if [ "$bag_status" -ne 0 ]; then cat /tmp/astra-bag.log; exit 20; fi
+if [ -n "${ASTRA_EVIDENCE_DIR:-}" ]; then
+  cp -a /tmp/astra-bag "$ASTRA_EVIDENCE_DIR/rosbag"
+  cp /tmp/astra-bag-verification.log "$ASTRA_EVIDENCE_DIR/verification.json"
+  cp /tmp/astra-executive-probe.log "$ASTRA_EVIDENCE_DIR/executive-probe.log"
+  cp /tmp/astra-probe.log "$ASTRA_EVIDENCE_DIR/safety-probe.log"
+fi
 arm_clamps=$(grep -c 'Command of at least one joint is out of limits' /tmp/astra-bringup.log || true)
 echo "arm_command_clamps:$arm_clamps"
 if [ "$arm_clamps" -gt 25 ]; then
@@ -143,7 +163,13 @@ echo 'Project 61 ROS/Gazebo and motor safety smoke passed.'
         $priorActionPreference = $ErrorActionPreference
         $ErrorActionPreference = 'Continue'
         try {
-            $output = docker run --rm --memory=4g $image bash -lc $smoke 2>&1
+            $dockerOptions = @('--rm', '--memory=4g')
+            if ($CaptureBag) {
+                $dockerOptions += @('--mount', "type=bind,source=$captureDirectory,target=/evidence", '-e', 'ASTRA_EVIDENCE_DIR=/evidence')
+            }
+            $encodedSmoke = [Convert]::ToBase64String([Text.Encoding]::UTF8.GetBytes($smoke))
+            $smokeCommand = "echo $encodedSmoke | base64 -d > /tmp/astra-run-smoke.sh && bash /tmp/astra-run-smoke.sh"
+            $output = docker run @dockerOptions $image bash -lc $smokeCommand 2>&1
             $runExitCode = $LASTEXITCODE
         }
         finally { $ErrorActionPreference = $priorActionPreference }
@@ -157,5 +183,6 @@ echo 'Project 61 ROS/Gazebo and motor safety smoke passed.'
         }
     }
     Write-Host "All $Runs clean ROS/Gazebo bringups passed." -ForegroundColor Green
+    if ($CaptureBag) { Write-Host "Preserved ROS evidence: $captureDirectory" -ForegroundColor Green }
 }
 finally { Pop-Location }

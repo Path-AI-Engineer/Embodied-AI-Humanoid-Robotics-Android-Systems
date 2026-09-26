@@ -13,6 +13,7 @@ This is a simulation research lab. It does not claim hard real-time behavior, ce
 - `python -m embodied.cli evaluate --split development --out reports/local`
 - `python -m unittest discover -s tests -v`
 - `pwsh -File scripts/quality-gate.ps1`
+- `pwsh -File scripts/ros-smoke.ps1 -SkipBuild -CaptureBag` (preserves one local sensor/evidence bag after the image has been built)
 
 Set `PYTHONPATH=src` when invoking Python directly. The PowerShell gate configures it automatically. The quality gate checks Ruff, 64 development scenarios, Python tests, TypeScript, ESLint, the production build, and desktop/mobile Playwright. `scenarios/test` is held out until the protocol and runtime are frozen. The ROS 2 package, Gazebo world, and control integration are separate from the portable headless reference and need their own runtime gate. A green portable/web gate alone is not ROS/Gazebo conformance or full project closure.
 

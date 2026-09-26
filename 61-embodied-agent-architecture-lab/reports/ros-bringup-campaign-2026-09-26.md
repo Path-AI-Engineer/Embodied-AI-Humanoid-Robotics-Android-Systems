@@ -64,3 +64,15 @@ Their differing hashes are expected from runtime timestamps and sample counts.
 The second campaign also used `docker run --rm`; these hashes identify verified
 ephemeral bags, not preserved replay inputs. The source-bound held-out split
 lock was committed afterwards and is not part of this ROS image.
+
+## Retained sensor bag (additional run)
+
+`pwsh -File scripts/ros-smoke.ps1 -SkipBuild -CaptureBag` passed on the same
+gateway image. It saved one ~554 MB SQLite rosbag2 file plus metadata and probe
+logs under ignored `reports/local/ros-evidence/20260926-141942-414881be/`.
+The bag SHA-256 was independently rechecked on the host as
+`8a82acd8192f1047644accc801a85b4134608c35063504cf6887eae57250c996`.
+It contains 660 lidar scans, 1,000 RGB frames, 998 depth frames, 3,295 odometry
+messages, `/clock`, one `/tf_static` sample, and the mission/safety topics.
+Capture and offline invariant checks passed; sensor-driven ROS replay and
+decision equivalence remain unverified.
