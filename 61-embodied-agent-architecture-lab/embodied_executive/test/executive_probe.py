@@ -68,6 +68,10 @@ def main():
     rclpy.init()
     node = Probe()
     try:
+        ready_deadline = time.monotonic() + 10
+        while time.monotonic() < ready_deadline and not node.states:
+            rclpy.spin_once(node, timeout_sec=0.05)
+        assert node.states, "safety state publisher not discovered"
         deadline = time.monotonic() + 45
         next_goal = 0.0
         while time.monotonic() < deadline and "ABORTED_SAFE" not in node.events:
@@ -80,7 +84,10 @@ def main():
         assert "SKILL_FAILED" in node.events, node.events
         assert node.events[-1] == "ABORTED_SAFE", node.events
         assert "SUCCEEDED" not in node.events, node.events
-        assert node.states and node.states[-1].mode != "ACTIVE", node.states[-1:]
+        safe_deadline = time.monotonic() + 3
+        while time.monotonic() < safe_deadline and node.states[-1].mode == "ACTIVE":
+            rclpy.spin_once(node, timeout_sec=0.05)
+        assert node.states[-1].mode != "ACTIVE", node.states[-1:]
         assert all(
             command.linear.x == 0 and command.angular.z == 0
             for command in node.commands

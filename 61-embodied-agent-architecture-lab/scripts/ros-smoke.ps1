@@ -43,7 +43,16 @@ if ! wait_active /camera_perception; then echo 'camera lifecycle activation time
 if ! wait_active /world_model; then echo 'world lifecycle activation timed out' >&2; exit 22; fi
 ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /clock > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
-sleep 2
+bag_ready=0
+for attempt in $(seq 1 20); do
+  if timeout 5s ros2 topic info /astra/evidence/mission_events 2>/dev/null | grep -Eq 'Subscription count: [1-9]'; then bag_ready=1; break; fi
+  sleep 0.3
+done
+if [ "$bag_ready" -ne 1 ]; then
+  cat /tmp/astra-bag.log
+  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
+  exit 27
+fi
 python3 /ws/src/embodied_executive/test/executive_probe.py > /tmp/astra-executive-probe.log 2>&1
 executive_status=$?
 if [ "$executive_status" -ne 0 ]; then

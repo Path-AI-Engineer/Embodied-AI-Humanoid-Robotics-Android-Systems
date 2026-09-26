@@ -284,6 +284,7 @@ class SkillServer(Node):
         target_id = goal_handle.request.target_id
         centered = 0
         iterations = 0
+        target_lost_at = None
         while time.monotonic() < deadline:
             if goal_handle.is_cancel_requested:
                 return "CANCELED", "operator_cancel"
@@ -308,8 +309,16 @@ class SkillServer(Node):
                 return "POLICY_DENIED", "goal_policy_expired_or_revoked"
             entity = self.fresh_entity(target_id)
             if entity is None:
-                self.get_logger().warning("alignment lost fresh RGB-D target")
-                return "STALE_TARGET", "rgbd_target_fact_expired"
+                self.send_intent(mission_id)
+                centered = 0
+                if target_lost_at is None:
+                    target_lost_at = time.monotonic()
+                if time.monotonic() - target_lost_at >= 0.5:
+                    self.get_logger().warning("alignment lost fresh RGB-D target")
+                    return "STALE_TARGET", "rgbd_target_fact_expired"
+                time.sleep(0.05)
+                continue
+            target_lost_at = None
             horizontal = entity.pose.pose.position.x
             depth = entity.pose.pose.position.z
             if (

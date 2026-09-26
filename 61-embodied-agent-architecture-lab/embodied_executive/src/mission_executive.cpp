@@ -1,4 +1,5 @@
 #include <chrono>
+#include <exception>
 #include <future>
 #include <memory>
 #include <mutex>
@@ -163,10 +164,10 @@ class SkillStep final : public BT::StatefulActionNode {
   std::chrono::steady_clock::time_point deadline_;
 };
 
-static void request_safe_stop(const std::shared_ptr<MissionNode>& node,
+static bool request_safe_stop(const std::shared_ptr<MissionNode>& node,
                               const std::string& mission, const std::string& target) {
   auto client = rclcpp_action::create_client<Skill>(node, "/astra/skills/invoke");
-  if (!client->wait_for_action_server(2s)) return;
+  if (!client->wait_for_action_server(2s)) return false;
   Skill::Goal goal;
   goal.schema_version = "astra.skill-invocation.v1";
   goal.mission_id = mission;
@@ -177,11 +178,14 @@ static void request_safe_stop(const std::shared_ptr<MissionNode>& node,
   goal.requested_at = node->now();
   goal.timeout_seconds = 2.0f;
   auto accepted = client->async_send_goal(goal);
-  if (accepted.wait_for(2s) != std::future_status::ready) return;
+  if (accepted.wait_for(2s) != std::future_status::ready) return false;
   auto handle = accepted.get();
-  if (!handle) return;
+  if (!handle) return false;
   auto result = client->async_get_result(handle);
-  result.wait_for(2s);
+  if (result.wait_for(2s) != std::future_status::ready) return false;
+  const auto wrapped = result.get();
+  return wrapped.code == rclcpp_action::ResultCode::SUCCEEDED &&
+         wrapped.result && wrapped.result->completed && wrapped.result->result_code == "OK";
 }
 
 int main(int argc, char** argv) {
@@ -197,29 +201,45 @@ int main(int argc, char** argv) {
       continue;
     }
     node->event(mission, "RUNNING");
-    BT::BehaviorTreeFactory factory;
-    factory.registerBuilder<SkillStep>("Skill", [node, mission, target](const std::string& name,
-        const BT::NodeConfig& config) {
-      return std::make_unique<SkillStep>(name, config, node, mission, target);
-    });
-    const char* xml = R"(<root BTCPP_format="4"><BehaviorTree ID="AstraMission"><SequenceWithMemory>
+    BT::NodeStatus status = BT::NodeStatus::FAILURE;
+    try {
+      BT::BehaviorTreeFactory factory;
+      factory.registerBuilder<SkillStep>("Skill", [node, mission, target](const std::string& name,
+          const BT::NodeConfig& config) {
+        return std::make_unique<SkillStep>(name, config, node, mission, target);
+      });
+      const char* xml = R"(<root BTCPP_format="4"><BehaviorTree ID="AstraMission"><SequenceWithMemory>
       <Skill skill="observe_area" timeout="5"/><Skill skill="locate_entity" timeout="5"/>
       <Skill skill="wait_for_clearance" timeout="10"/><Skill skill="navigate_to" timeout="30"/>
       <Skill skill="align_base" timeout="8"/><Skill skill="point_at" timeout="10"/>
       <Skill skill="inspect_entity" timeout="5"/><Skill skill="speak_report" timeout="5"/>
       <Skill skill="return_home" timeout="30"/><Skill skill="safe_stop" timeout="2"/>
       </SequenceWithMemory></BehaviorTree></root>)";
-    auto tree = factory.createTreeFromText(xml);
-    BT::NodeStatus status = BT::NodeStatus::RUNNING;
-    const auto mission_deadline = std::chrono::steady_clock::now() + 90s;
-    while (rclcpp::ok() && status == BT::NodeStatus::RUNNING &&
-           std::chrono::steady_clock::now() < mission_deadline) {
-      status = tree.tickOnce();
-      std::this_thread::sleep_for(50ms);
+      auto tree = factory.createTreeFromText(xml);
+      status = BT::NodeStatus::RUNNING;
+      const auto mission_deadline = std::chrono::steady_clock::now() + 90s;
+      while (rclcpp::ok() && status == BT::NodeStatus::RUNNING &&
+             std::chrono::steady_clock::now() < mission_deadline) {
+        status = tree.tickOnce();
+        std::this_thread::sleep_for(50ms);
+      }
+      tree.haltTree();
+    } catch (const std::exception& error) {
+      RCLCPP_ERROR(node->get_logger(), "mission executive failed: %s", error.what());
+      node->event(mission, "EXECUTIVE_ERROR");
+      status = BT::NodeStatus::FAILURE;
     }
-    tree.haltTree();
-    if (status != BT::NodeStatus::SUCCESS) request_safe_stop(node, mission, target);
-    node->finish(mission, status == BT::NodeStatus::SUCCESS ? "SUCCEEDED" : "ABORTED_SAFE");
+    if (status == BT::NodeStatus::SUCCESS) {
+      node->finish(mission, "SUCCEEDED");
+    } else {
+      bool stopped = false;
+      try {
+        stopped = request_safe_stop(node, mission, target);
+      } catch (const std::exception& error) {
+        RCLCPP_ERROR(node->get_logger(), "safe stop request failed: %s", error.what());
+      }
+      node->finish(mission, stopped ? "ABORTED_SAFE" : "ABORTED_UNCONFIRMED");
+    }
   }
   executor.cancel();
   spin.join();

@@ -14,13 +14,17 @@ from astra_interfaces.msg import (
 )
 from geometry_msgs.msg import Twist
 from rclpy.node import Node
+from rclpy.parameter import Parameter
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
 from std_msgs.msg import Bool
 
 
 class Probe(Node):
     def __init__(self):
-        super().__init__("safety_gateway_probe")
+        super().__init__(
+            "safety_gateway_probe",
+            parameter_overrides=[Parameter("use_sim_time", value=True)],
+        )
         self.states = []
         self.commands = []
         self.percepts = []
@@ -107,6 +111,32 @@ def request_decision(node, goal, expected):
     )
 
 
+def send_fresh_intent(node, intent):
+    intent.issued_at = node.get_clock().now().to_msg()
+    node.intent.publish(intent)
+
+
+def wait_for_bounded_command(node, intent):
+    """Use the gateway's observed sim clock to keep a bounded intent fresh."""
+    deadline = time.monotonic() + 2.0
+    last_state_stamp = None
+    while time.monotonic() < deadline:
+        rclpy.spin_once(node, timeout_sec=0.02)
+        if node.states and node.states[-1].mode == "ACTIVE":
+            stamp = node.states[-1].observed_at
+            stamp_key = (stamp.sec, stamp.nanosec)
+            if stamp_key != last_state_stamp:
+                intent.issued_at = stamp
+                node.intent.publish(intent)
+                last_state_stamp = stamp_key
+        if any(command.linear.x > 0.0 for command in node.commands):
+            return
+    raise AssertionError(
+        "bounded command timed out; "
+        f"last state={node.states[-1] if node.states else 'none'}"
+    )
+
+
 def main():
     rclpy.init()
     node = Probe()
@@ -115,6 +145,10 @@ def main():
         warmup_until = time.monotonic() + 2.0
         while time.monotonic() < warmup_until:
             rclpy.spin_once(node, timeout_sec=0.05)
+        node.until(
+            lambda: node.recover.get_subscription_count() >= 2,
+            seconds=12,
+        )
         node.until(lambda: any(s.mode == "SAFE_IDLE" for s in node.states))
         node.until(lambda: any(p.entity_id == "obstacle/front" for p in node.percepts))
         node.until(lambda: any(e.entity_id == "obstacle/front" for e in node.entities))
@@ -151,11 +185,9 @@ def main():
         intent.mission_id = goal.mission_id
         intent.frame_id = "base_link"
         intent.clock_domain = "sim"
-        intent.issued_at = node.states[-1].observed_at
         intent.ttl_seconds = 0.2
         intent.linear_meters_per_second = 0.12
-        node.intent.publish(intent)
-        node.until(lambda: any(c.linear.x > 0.0 for c in node.commands), 2)
+        wait_for_bounded_command(node, intent)
         node.estop.publish(Bool(data=True))
         node.until(
             lambda: node.states
@@ -163,7 +195,7 @@ def main():
             and node.states[-1].estop_latched
         )
         zero_index = len(node.commands)
-        node.intent.publish(intent)
+        send_fresh_intent(node, intent)
         node.until(lambda: len(node.commands) > zero_index)
         assert all(c.linear.x == 0.0 for c in node.commands[zero_index:])
         node.recover.publish(Bool(data=True))
@@ -175,10 +207,9 @@ def main():
         bad.mission_id = intent.mission_id
         bad.frame_id = intent.frame_id
         bad.clock_domain = intent.clock_domain
-        bad.issued_at = node.states[-1].observed_at
         bad.ttl_seconds = 0.2
         bad.linear_meters_per_second = 1.0
-        node.intent.publish(bad)
+        send_fresh_intent(node, bad)
         node.until(
             lambda: node.states
             and node.states[-1].mode == "PROTECTIVE_STOP"

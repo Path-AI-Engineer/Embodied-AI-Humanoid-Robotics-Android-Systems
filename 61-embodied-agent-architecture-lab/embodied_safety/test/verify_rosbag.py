@@ -23,10 +23,17 @@ def main():
         topic.name: topic.type for topic in reader.get_all_topics_and_types()
     }
     events = []
+    mission_events = []
     counts = {}
     while reader.has_next():
         topic, serialized, timestamp = reader.read_next()
         counts[topic] = counts.get(topic, 0) + 1
+        if topic == "/astra/evidence/mission_events":
+            message = deserialize_message(serialized, get_message(topic_types[topic]))
+            event = json.loads(message.data)
+            if event["mission_id"] == "mission-ros-probe":
+                mission_events.append(event["status"])
+            continue
         if topic not in {
             "/astra/safety/faults",
             "/astra/safety/recovery",
@@ -64,6 +71,16 @@ def main():
     recovery_index = labels.index("recovery", estop_index)
     if "motor_nonzero" in labels[estop_index + 1 : recovery_index]:
         raise AssertionError("nonzero motor command after E-stop before recovery")
+    expected_mission = [
+        "RUNNING",
+        "SKILL_OK",
+        "SKILL_OK",
+        "SKILL_OK",
+        "SKILL_FAILED",
+        "ABORTED_SAFE",
+    ]
+    if mission_events != expected_mission:
+        raise AssertionError(f"mission trace incomplete or reordered: {mission_events}")
     digest = hashlib.sha256(files[0].read_bytes()).hexdigest()
     print(
         json.dumps(
@@ -72,6 +89,7 @@ def main():
                 "topics": counts,
                 "estop_to_recovery_zero_motion": True,
                 "policy_and_fault_lineage": True,
+                "mission_event_sequence": "verified",
             },
             sort_keys=True,
         )
