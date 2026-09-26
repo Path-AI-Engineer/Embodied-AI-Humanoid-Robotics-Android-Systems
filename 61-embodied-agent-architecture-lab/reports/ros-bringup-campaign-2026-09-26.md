@@ -1,6 +1,7 @@
 # Twelve clean ROS/Gazebo bringups
 
-Status: **passed** for the local Lyrical/Jetty simulation image. This is not a
+Status: **passed** for the local Lyrical/Jetty simulation image, then **passed
+again after the independent arm-control gateway was added**. This is not a
 release approval, hardware safety result, or deterministic ROS replay result.
 
 - Command: `pwsh -File scripts/ros-smoke.ps1 -Runs 12`
@@ -33,3 +34,33 @@ release approval, hardware safety result, or deterministic ROS replay result.
 The digests identify the ephemeral bags observed by the verifier. The bags
 themselves were inside removed containers and are not a durable replay bundle.
 Their differing hashes are expected from runtime timestamps and sample counts.
+
+## Independent arm-gateway revision
+
+- Command: `pwsh -File scripts/ros-smoke.ps1 -SkipBuild -Runs 12`
+- Image ID: `sha256:886fa985c73beab9376c0eb3972a80a6c84448e8fd2b525bd1f2e89f36a5f917`
+- Result: 12/12 fresh, disposable ROS/Gazebo containers passed. Each completed
+  the ten-skill mission, arm-point action through the independent gateway,
+  unauthorized arm-action rejection, six-axis joint bounds, and E-stop-to-
+  recovery zero-motion bag check. This campaign does **not** demonstrate
+  graph-wide SROS2 enforcement, MoveIt planning, deterministic replay or
+  bounded arm-stop latency.
+
+| Run | ROS bag SQLite SHA-256 | Result |
+| --- | --- | --- |
+| 1 | `5c5c5c37553fc8ca4abaf5fb14d6cde9f920f02fb282196754c229d1084d089c` | PASS |
+| 2 | `c97965c0a5b2de249d2f54c60550aa20c57b16d042200618a7caddc7b9914b57` | PASS |
+| 3 | `8f02b922ca98546ed0d5c596175a18c51fcba76f8974d4df4bab62c023fcd9d4` | PASS |
+| 4 | `e3eb40260e682d11d40002455f5fb08d55f8ea1059a09c17e3c4ce7a675a17a7` | PASS |
+| 5 | `f3a668b089b3ff4dba11b9e8738e6dc9a63d23f331c9ba643e8ec6c7026ee15c` | PASS |
+| 6 | `b304c988dfb3fe503685949f9ba95dea6567266535ffda57062d3cbc8532cdda` | PASS |
+| 7 | `79b65fd7b4ea204833d4999667c1f9dda19780bc6a97db210ec69c52bfd1b368` | PASS |
+| 8 | `65157087d9acc833f684dc04fdfbb44761a2de97becf1a07448fa333ee2f4083` | PASS |
+| 9 | `ffa2f8bb15f7514e7d78053ea606c4c2fee00a8c947eb59d0833dc67823e6397` | PASS |
+| 10 | `cfa306dee1679f860963f1bbdd9eb31e7699e5ab3585c396837ecf000a020fd9` | PASS |
+| 11 | `8f9beddf558a874a05c50ec7cf0a5acc5d9a46fff016c878d62231a590966acf` | PASS |
+| 12 | `cbcff1e887596a031caaac720cd09793892fe66aa850f5fc9d0848e91509ab08` | PASS |
+
+The second campaign also used `docker run --rm`; these hashes identify verified
+ephemeral bags, not preserved replay inputs. The source-bound held-out split
+lock was committed afterwards and is not part of this ROS image.
