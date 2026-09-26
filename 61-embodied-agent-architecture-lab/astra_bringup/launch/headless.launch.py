@@ -27,5 +27,6 @@ def generate_launch_description():
         LifecycleNode(package="embodied_observation", executable="world_model", name="world_model", namespace="", autostart=True, parameters=[{"use_sim_time": True}], output="screen"),
         Node(package="embodied_goals", executable="goal_gateway", name="goal_gateway", parameters=[{"use_sim_time": True}], output="screen"),
         Node(package="embodied_skills", executable="skill_server", name="skill_server", parameters=[{"use_sim_time": True}], output="screen"),
+        Node(package="embodied_executive", executable="mission_executive", name="mission_executive", parameters=[{"use_sim_time": True}], output="screen"),
         ExecuteProcess(cmd=["ros2", "run", "ros_gz_sim", "create", "-name", "astra", "-topic", "/astra/robot_description", "-x", "-2", "-y", "0", "-z", "0.3"], output="screen"),
     ])

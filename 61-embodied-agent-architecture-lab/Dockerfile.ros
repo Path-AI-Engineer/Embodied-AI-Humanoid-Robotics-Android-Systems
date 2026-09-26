@@ -24,7 +24,8 @@ COPY embodied_safety /ws/src/embodied_safety
 COPY embodied_observation /ws/src/embodied_observation
 COPY embodied_goals /ws/src/embodied_goals
 COPY embodied_skills /ws/src/embodied_skills
+COPY embodied_executive /ws/src/embodied_executive
 COPY astra_bringup /ws/src/astra_bringup
-RUN bash -lc '. /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && colcon build --merge-install --packages-select embodied_safety embodied_observation embodied_goals embodied_skills astra_bringup --event-handlers console_direct+'
+RUN bash -lc '. /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && colcon build --merge-install --packages-select embodied_safety embodied_observation embodied_goals embodied_skills embodied_executive astra_bringup --event-handlers console_direct+'
 ENV AMENT_PREFIX_PATH=/ws/install:/opt/ros/lyrical
 CMD ["bash", "-lc", ". /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && ros2 launch astra_bringup headless.launch.py"]

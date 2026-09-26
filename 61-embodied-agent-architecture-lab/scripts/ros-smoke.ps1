@@ -41,9 +41,17 @@ wait_state() {
 if ! wait_active /lidar_perception; then echo 'lidar lifecycle activation timed out' >&2; exit 21; fi
 if ! wait_active /camera_perception; then echo 'camera lifecycle activation timed out' >&2; exit 24; fi
 if ! wait_active /world_model; then echo 'world lifecycle activation timed out' >&2; exit 22; fi
-ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /clock > /tmp/astra-bag.log 2>&1 &
+ros2 bag record -o /tmp/astra-bag --storage sqlite3 --polling-interval 100 --topics /astra/safety/state /astra/safety/faults /astra/safety/recovery /astra/control/intent /astra/control/authorized_cmd_vel /astra/goals/request /astra/goals/decision /astra/perception/percepts /astra/world/entities /astra/skills/catalog /astra/skills/feedback /astra/skills/spoken_report /astra/evidence/mission_events /clock > /tmp/astra-bag.log 2>&1 &
 bag_pid=$!
 sleep 2
+python3 /ws/src/embodied_executive/test/executive_probe.py > /tmp/astra-executive-probe.log 2>&1
+executive_status=$?
+if [ "$executive_status" -ne 0 ]; then
+  cat /tmp/astra-executive-probe.log
+  tail -n 30 /tmp/astra-bringup.log
+  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
+  exit 26
+fi
 python3 /ws/src/embodied_skills/test/skill_action_probe.py > /tmp/astra-skill-probe.log 2>&1
 skill_status=$?
 if [ "$skill_status" -ne 0 ]; then
@@ -66,6 +74,7 @@ bag_status=$?
 kill $launch_pid 2>/dev/null || true
 wait $launch_pid 2>/dev/null || true
 cat /tmp/astra-bringup.log
+cat /tmp/astra-executive-probe.log
 cat /tmp/astra-skill-probe.log
 cat /tmp/astra-probe.log
 if [ "$skill_status" -ne 0 ]; then exit 25; fi

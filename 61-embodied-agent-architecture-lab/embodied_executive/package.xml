@@ -1,0 +1,14 @@
+<?xml version="1.0"?>
+<package format="3">
+  <name>embodied_executive</name>
+  <version>0.1.0</version>
+  <description>Bounded Astra mission executive using BehaviorTree.CPP and typed ROS actions.</description>
+  <maintainer email="engineering@example.invalid">Embodied Systems Lab</maintainer>
+  <license>MIT</license>
+  <buildtool_depend>ament_cmake</buildtool_depend>
+  <depend>astra_interfaces</depend>
+  <depend>behaviortree_cpp</depend>
+  <depend>rclcpp</depend>
+  <depend>rclcpp_action</depend>
+  <depend>std_msgs</depend>
+</package>
