@@ -95,3 +95,15 @@ The different RGB-D count is evidence that this transport-level replay is
 **not exact decision-equivalent**. Scheduling and frame pairing must be
 controlled before claiming deterministic ROS replay. Neither replay exercised
 the mission executive or motor path.
+
+## Arm E-stop fault injection
+
+A subsequent fresh-image smoke with image
+`sha256:28b435820f8cc6af0f32b7655a4eb5945c1712a1b55f0cd1af6c9f3b3829d149`
+injected E-stop while a six-axis point trajectory was moving. The arm gateway
+reported `SAFETY_STOP`, the measured simulated arm velocity settled to at most
+0.05 rad/s after 0.526 wall seconds, did not exceed 0.0002 rad/s during the
+following latched observation window, and required explicit recovery to
+`SAFE_IDLE`. The normal ten-skill mission and existing bag checks passed after
+recovery. This is **one measured run**, not a worst-case latency bound or
+certified safety result.

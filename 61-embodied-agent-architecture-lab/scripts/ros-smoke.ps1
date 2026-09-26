@@ -97,6 +97,14 @@ if [ "$bag_ready" -ne 1 ]; then
   kill -TERM $bag_pid $launch_pid 2>/dev/null || true
   exit 27
 fi
+python3 /ws/src/embodied_safety/test/arm_estop_probe.py > /tmp/astra-arm-stop.log 2>&1
+arm_stop_status=$?
+if [ "$arm_stop_status" -ne 0 ]; then
+  cat /tmp/astra-arm-stop.log
+  tail -n 40 /tmp/astra-bringup.log
+  kill -TERM $bag_pid $launch_pid 2>/dev/null || true
+  exit 30
+fi
 python3 /ws/src/embodied_skills/test/skill_action_probe.py > /tmp/astra-skill-probe.log 2>&1
 skill_status=$?
 if [ "$skill_status" -ne 0 ]; then
@@ -128,10 +136,12 @@ bag_status=$?
 kill $launch_pid 2>/dev/null || true
 wait $launch_pid 2>/dev/null || true
 cat /tmp/astra-bringup.log
+cat /tmp/astra-arm-stop.log
 cat /tmp/astra-executive-probe.log
 cat /tmp/astra-skill-probe.log
 cat /tmp/astra-probe.log
 if [ "$skill_status" -ne 0 ]; then exit 25; fi
+if [ "$arm_stop_status" -ne 0 ]; then exit 30; fi
 if [ "$probe_status" -ne 0 ]; then exit 19; fi
 if [ "$lifecycle_status" -ne 0 ]; then cat /tmp/astra-lifecycle.log; exit 23; fi
 cat /tmp/astra-bag-verification.log
@@ -140,6 +150,7 @@ if [ -n "${ASTRA_EVIDENCE_DIR:-}" ]; then
   cp -a /tmp/astra-bag "$ASTRA_EVIDENCE_DIR/rosbag"
   cp /tmp/astra-bag-verification.log "$ASTRA_EVIDENCE_DIR/verification.json"
   cp /tmp/astra-executive-probe.log "$ASTRA_EVIDENCE_DIR/executive-probe.log"
+  cp /tmp/astra-arm-stop.log "$ASTRA_EVIDENCE_DIR/arm-stop-probe.log"
   cp /tmp/astra-probe.log "$ASTRA_EVIDENCE_DIR/safety-probe.log"
 fi
 arm_clamps=$(grep -c 'Command of at least one joint is out of limits' /tmp/astra-bringup.log || true)
