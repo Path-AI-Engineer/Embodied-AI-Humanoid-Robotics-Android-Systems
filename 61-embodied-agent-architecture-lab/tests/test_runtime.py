@@ -1,8 +1,10 @@
 import json
 import math
+import tempfile
 import unittest
 from dataclasses import replace
 from pathlib import Path
+from unittest.mock import patch
 
 from embodied.contracts import (
     ClockDomain,
@@ -19,6 +21,7 @@ from embodied.evidence import build_record, replay_equivalent, verify_record
 from embodied.executive import run_mission
 from embodied.runtime import GoalGateway
 from embodied.safety import SafetySignals, SafetySupervisor
+from embodied.protocol import require_test_freeze
 from embodied.simulation import AstraSimulator, Scenario, ScoringChannel
 
 
@@ -27,6 +30,25 @@ BASE = Scenario("unit-success", 6100, "object-00", "inspection-station", 1.0, 0.
 
 
 class ContractTests(unittest.TestCase):
+    def test_test_freeze_rejects_unsealed_or_mismatched_source(self) -> None:
+        with tempfile.TemporaryDirectory() as directory:
+            manifest = Path(directory) / "evaluation-freeze.v1.json"
+            with patch("embodied.protocol.FREEZE", manifest):
+                with self.assertRaises(PermissionError):
+                    require_test_freeze()
+                manifest.write_text(
+                    json.dumps(
+                        {
+                            "schema_version": "astra.evaluation-freeze.v1",
+                            "status": "sealed",
+                            "files": {"src/embodied/cli.py": "forged"},
+                        }
+                    ),
+                    encoding="utf-8",
+                )
+                with self.assertRaises(PermissionError):
+                    require_test_freeze()
+
     def test_clock_frame_and_freshness_are_explicit(self) -> None:
         valid = Observation(
             "rgbd",
@@ -143,10 +165,20 @@ class SafetyTests(unittest.TestCase):
 
 class MissionTests(unittest.TestCase):
     def test_locked_test_split_rejects_direct_run_and_evaluation(self) -> None:
-        with self.assertRaises(PermissionError):
-            run(ROOT / "scenarios/test/mission-064.json", ROOT / "reports/local")
+        with patch("embodied.cli.load_scenario") as load:
+            with self.assertRaises(PermissionError):
+                run(ROOT / "scenarios/test/mission-064.json", ROOT / "reports/local")
+            with self.assertRaises(PermissionError):
+                run(
+                    ROOT / "scenarios/test/mission-064.json",
+                    ROOT / "reports/local",
+                    unlock_test=True,
+                )
+            load.assert_not_called()
         with self.assertRaises(PermissionError):
             evaluate("test", ROOT / "reports/local", unlock_test=False)
+        with self.assertRaises(PermissionError):
+            evaluate("test", ROOT / "reports/local", unlock_test=True)
 
     def test_direct_motor_commit_is_rejected(self) -> None:
         simulator = AstraSimulator(BASE)

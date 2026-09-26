@@ -16,6 +16,7 @@ from .evidence import (
     write_record,
 )
 from .executive import run_mission, scenario_from_dict
+from .protocol import require_test_freeze
 
 
 ROOT = Path(__file__).resolve().parents[2]
@@ -33,15 +34,21 @@ def load_scenario(path: Path):  # type: ignore[no-untyped-def]
 
 
 def run(path: Path, output: Path, *, unlock_test: bool = False) -> dict[str, object]:
+    fixture_number = path.stem.removeprefix("mission-")
+    locked_path = path.resolve().is_relative_to((ROOT / "scenarios" / "test").resolve())
+    if locked_path or (fixture_number.isdigit() and int(fixture_number) >= 64):
+        if not unlock_test:
+            raise PermissionError("locked test scenario requires --unlock-test")
+        require_test_freeze()
     scenario = load_scenario(path)
     if not SCENARIO_ID_RE.fullmatch(scenario.scenario_id):
         raise ValueError("scenario_id must be mission-NNN")
     if path.stem != scenario.scenario_id:
         raise ValueError("scenario ID does not match fixture filename")
-    if int(scenario.scenario_id.removeprefix("mission-")) >= 64 and not unlock_test:
-        raise PermissionError(
-            "locked test scenario requires --unlock-test after protocol freeze"
-        )
+    if int(scenario.scenario_id.removeprefix("mission-")) >= 64:
+        if not unlock_test:
+            raise PermissionError("locked test scenario requires --unlock-test")
+        require_test_freeze()
     record = build_record(
         scenario, run_mission(scenario), profile_sha256=profile_digest()
     )
@@ -56,10 +63,10 @@ def run(path: Path, output: Path, *, unlock_test: bool = False) -> dict[str, obj
 
 
 def evaluate(split: str, output: Path, *, unlock_test: bool) -> dict[str, object]:
-    if split == "test" and not unlock_test:
-        raise PermissionError(
-            "locked test split requires --unlock-test after protocol freeze"
-        )
+    if split == "test":
+        if not unlock_test:
+            raise PermissionError("locked test split requires --unlock-test")
+        require_test_freeze()
     paths = sorted((ROOT / "scenarios" / split).glob("mission-*.json"))
     expected = 64 if split == "development" else 32
     if len(paths) != expected:
