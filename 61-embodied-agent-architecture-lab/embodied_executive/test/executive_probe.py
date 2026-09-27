@@ -61,18 +61,21 @@ class Probe(Node):
         goal.requested_by = "local-operator"
         goal.frame_id = "map"
         goal.clock_domain = "sim"
-        goal.requested_at = self.get_clock().now().to_msg()
+        goal.requested_at = self.states[-1].observed_at
         goal.ttl_seconds = 0.8
         self.goals.publish(goal)
 
     def operator_arm(self):
         self.arm.publish(Bool(data=True))
+        self.zero_heartbeat()
+
+    def zero_heartbeat(self):
         intent = ControlIntent()
         intent.schema_version = "astra.control-intent.v1"
         intent.mission_id = MISSION
         intent.frame_id = "base_link"
         intent.clock_domain = "sim"
-        intent.issued_at = self.get_clock().now().to_msg()
+        intent.issued_at = self.states[-1].observed_at
         intent.ttl_seconds = 0.2
         self.intent.publish(intent)
 
@@ -87,12 +90,28 @@ def main():
         assert node.states, "safety state publisher not discovered"
         deadline = time.monotonic() + 90
         next_goal = 0.0
+        next_point_heartbeat = 0.0
         armed_stages = set()
-        while time.monotonic() < deadline and "SUCCEEDED" not in node.events:
+        while (
+            time.monotonic() < deadline
+            and "SUCCEEDED" not in node.events
+            and "ABORTED_SAFE" not in node.events
+            and "ABORTED_UNCONFIRMED" not in node.events
+        ):
             if "RUNNING" not in node.events and time.monotonic() >= next_goal:
                 node.publish_goal()
                 next_goal = time.monotonic() + 0.15
             stage = node.events.count("SKILL_OK")
+            if (
+                stage == 5
+                and node.states
+                and node.states[-1].mode == "ACTIVE"
+                and time.monotonic() >= next_point_heartbeat
+            ):
+                # Keep the operator's zero-motion lease alive while DDS hands
+                # point_at from the executive to the independent arm gateway.
+                node.zero_heartbeat()
+                next_point_heartbeat = time.monotonic() + 0.08
             if stage in {3, 4, 5, 8} and stage not in armed_stages and node.states:
                 if node.states[-1].mode == "SAFE_IDLE":
                     node.operator_arm()
@@ -100,7 +119,11 @@ def main():
                     armed_stages.add(stage)
             rclpy.spin_once(node, timeout_sec=0.05)
         assert "RUNNING" in node.events, node.events
-        assert node.events.count("SKILL_OK") == 10, node.events
+        assert node.events.count("SKILL_OK") == 10, (
+            f"events={node.events}; "
+            f"safety={node.states[-1] if node.states else 'none'}; "
+            f"recent_reasons={[state.reason for state in node.states[-30:]]}"
+        )
         assert "SKILL_FAILED" not in node.events, node.events
         assert node.events[-1] == "SUCCEEDED", node.events
         safe_deadline = time.monotonic() + 3

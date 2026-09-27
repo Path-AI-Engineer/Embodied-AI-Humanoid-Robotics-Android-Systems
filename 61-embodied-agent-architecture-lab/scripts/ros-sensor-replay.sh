@@ -64,7 +64,10 @@ sleep 2
 kill -TERM "$record_pid" 2>/dev/null || true
 wait "$record_pid" 2>/dev/null || true
 record_pid=''
-python3 /task/scripts/verify_sensor_replay.py /tmp/replay-output >/tmp/replay-verification.log 2>&1
+if ! python3 /task/scripts/verify_sensor_replay.py /evidence/rosbag /tmp/replay-output >/tmp/replay-verification.log 2>&1; then
+  cat /tmp/replay-verification.log
+  exit 14
+fi
 cat /tmp/replay-verification.log
 cp -a /tmp/replay-output /output/rosbag
 cp /tmp/replay-verification.log /output/verification.log

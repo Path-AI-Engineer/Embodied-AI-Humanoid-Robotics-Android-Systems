@@ -61,10 +61,22 @@ class CameraPerception(LifecycleNode):
     def __init__(self):
         super().__init__("camera_perception")
         self.active = False
-        self.latest_depth = None
+        self.pending_rgb = {}
+        self.pending_depth = {}
+        self.rgb_count = 0
+        self.depth_count = 0
+        self.pair_count = 0
+        self.fresh_count = 0
+        self.marker_count = 0
+        self.valid_depth_count = 0
+        self.published_count = 0
         sensor_qos = QoSProfile(depth=3, reliability=ReliabilityPolicy.BEST_EFFORT)
+        percept_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.RELIABLE)
         self.publisher = self.create_lifecycle_publisher(
-            Percept, "/astra/perception/percepts", sensor_qos
+            Percept, "/astra/perception/percepts", percept_qos
+        )
+        self.world_publisher = self.create_lifecycle_publisher(
+            Percept, "/astra/perception/camera", percept_qos
         )
         self.depth_subscription = self.create_subscription(
             Image, DEPTH_TOPIC, self.on_depth, sensor_qos
@@ -74,7 +86,8 @@ class CameraPerception(LifecycleNode):
         )
 
     def on_configure(self, state):
-        self.latest_depth = None
+        self.pending_rgb.clear()
+        self.pending_depth.clear()
         return TransitionCallbackReturn.SUCCESS
 
     def on_activate(self, state):
@@ -83,31 +96,60 @@ class CameraPerception(LifecycleNode):
 
     def on_deactivate(self, state):
         self.active = False
-        self.latest_depth = None
+        self.pending_rgb.clear()
+        self.pending_depth.clear()
         return super().on_deactivate(state)
 
     def on_depth(self, image):
         if self.active and image.header.frame_id == OPTICAL_FRAME:
-            self.latest_depth = image
+            key = stamp_ns(image.header.stamp)
+            self.depth_count += 1
+            self.pending_depth[key] = image
+            for old_key in sorted(self.pending_depth)[:-12]:
+                del self.pending_depth[old_key]
+            self.try_pair(key)
 
     def on_rgb(self, image):
         if not self.active or image.header.frame_id != OPTICAL_FRAME:
             return
-        depth = self.latest_depth
-        if depth is None or depth.width != image.width or depth.height != image.height:
-            return
         observed_ns = stamp_ns(image.header.stamp)
-        age = (self.get_clock().now().nanoseconds - observed_ns) / 10**9
-        depth_delta = abs(observed_ns - stamp_ns(depth.header.stamp)) / 10**9
-        if not -0.05 <= age <= 0.25 or depth_delta > 0.10:
+        self.rgb_count += 1
+        self.pending_rgb[observed_ns] = image
+        for old_key in sorted(self.pending_rgb)[:-12]:
+            del self.pending_rgb[old_key]
+        self.try_pair(observed_ns)
+        if self.rgb_count % 100 == 0:
+            self.get_logger().info(
+                "rgbd_pairing "
+                f"rgb={self.rgb_count} depth={self.depth_count} "
+                f"matched={self.pair_count} fresh={self.fresh_count} "
+                f"red={self.marker_count} valid_depth={self.valid_depth_count} "
+                f"published={self.published_count}"
+            )
+
+    def try_pair(self, observed_ns):
+        image = self.pending_rgb.get(observed_ns)
+        depth = self.pending_depth.get(observed_ns)
+        if image is None or depth is None:
             return
+        del self.pending_rgb[observed_ns]
+        del self.pending_depth[observed_ns]
+        self.pair_count += 1
+        if depth.width != image.width or depth.height != image.height:
+            return
+        age = (self.get_clock().now().nanoseconds - observed_ns) / 10**9
+        if not -0.05 <= age <= 0.25:
+            return
+        self.fresh_count += 1
         centroid = red_centroid(image)
         if centroid is None:
             return
+        self.marker_count += 1
         count, x, y = centroid
         range_m = marker_depth(depth, x, y)
         if range_m is None:
             return
+        self.valid_depth_count += 1
         focal_pixels = image.width / (2 * math.tan(HORIZONTAL_FOV_RADIANS / 2))
         percept = Percept()
         percept.schema_version = "astra.percept.v1"
@@ -127,6 +169,8 @@ class CameraPerception(LifecycleNode):
         percept.pose.covariance[14] = 0.04
         percept.result_code = "OK"
         self.publisher.publish(percept)
+        self.world_publisher.publish(percept)
+        self.published_count += 1
 
 
 def main():

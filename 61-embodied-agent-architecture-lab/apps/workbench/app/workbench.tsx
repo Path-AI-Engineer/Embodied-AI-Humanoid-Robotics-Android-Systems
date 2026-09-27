@@ -6,6 +6,7 @@ type Interface = { name: string; owner: string; topic?: string; action?: string;
 type Overview = { summary: { count: number; outcomes: Record<string, number>; unsafe_motor_commands: number; all_terminal_manifests_valid: boolean; all_replays_equivalent: boolean }; profile: { operating_system: string; ros_distro: string; gazebo_distribution: string; status: string; base_image_digest: string }; catalog: { interfaces: Interface[] }; runs: string[] };
 type Event = { sequence: number; sim_time_s: number; kind: string; name?: string; code?: string; reason?: string; mode?: string; entity_id?: string; allowed?: boolean; outcome?: string };
 type RecordData = { sha256: string; payload: { scenario: { scenario_id: string; target_id: string; fault: string; seed: number }; outcome: string; reason: string; safety_mode: string; events: Event[]; score: { motor_commands: number; unsafe_motor_commands: number }; profile_sha256: string; clock_domain: string } };
+type RosEvidence = { status: "verified" | "not_available"; clean_bringups?: number; image_id?: string; minimum_arm_samples_within_limits?: number; estop_to_recovery_zero_motion?: boolean; mission_event_sequence?: string };
 type View = "System topology" | "TF & clock" | "Topic / QoS" | "World model" | "Goal & policy" | "Plan trace" | "Skill timeline" | "Safety & faults" | "Sensor / control latency" | "Replay & evidence";
 
 const VIEWS: View[] = ["System topology", "TF & clock", "Topic / QoS", "World model", "Goal & policy", "Plan trace", "Skill timeline", "Safety & faults", "Sensor / control latency", "Replay & evidence"];
@@ -17,12 +18,14 @@ export default function Workbench() {
   const [overview, setOverview] = useState<Overview | null>(null);
   const [selected, setSelected] = useState("mission-000");
   const [run, setRun] = useState<RecordData | null>(null);
+  const [rosEvidence, setRosEvidence] = useState<RosEvidence | null>(null);
   const [view, setView] = useState<View>("System topology");
   const [error, setError] = useState("");
   const [busy, setBusy] = useState(false);
 
   useEffect(() => {
     fetch("/api/overview").then(async r => { if (!r.ok) throw new Error("Local evidence API is unavailable"); return r.json(); }).then(setOverview).catch(e => setError(String(e)));
+    fetch("/api/ros-evidence").then(async r => { if (!r.ok) throw new Error("ROS campaign evidence failed validation"); return r.json(); }).then(setRosEvidence).catch(e => setError(String(e)));
   }, []);
   useEffect(() => {
     fetch(`/api/runs/${selected}`).then(async r => { if (!r.ok) throw new Error("Run evidence is unavailable"); return r.json(); }).then(setRun).catch(e => setError(String(e)));
@@ -68,7 +71,7 @@ export default function Workbench() {
           {view === "Skill timeline" && <><p className="surface-intro">Each skill invocation has a result code and simulated timestamp.</p><EventList events={skillEvents}/></>}
           {view === "Safety & faults" && <><p className="surface-intro">E-stop latches. Protective stops require explicit recovery and a new self-check.</p><div className="info-grid"><Info title="Final safety mode" value={run?.payload.safety_mode ?? "—"}/><Info title="Unsafe motor commits" value={String(run?.payload.score.unsafe_motor_commands ?? 0)}/></div><EventList events={safetyEvents}/></>}
           {view === "Sensor / control latency" && <><p className="surface-intro">Sensor freshness and command deadlines are checked in simulated seconds. These values are descriptive, not hard real-time guarantees.</p><div className="info-grid"><Info title="Percept TTL" value="250 ms"/><Info title="Transform age limit" value="200 ms"/><Info title="Command age limit" value="200 ms"/><Info title="Safety state deadline" value="100 ms"/></div></>}
-          {view === "Replay & evidence" && <><p className="surface-intro">A canonical SHA-256 covers the mission record. Re-running the same fixture reproduces its event sequence.</p><div className="info-grid"><Info title="Outcome" value={run?.payload.outcome ?? "—"}/><Info title="Reason" value={run?.payload.reason ?? "—"}/><Info title="Events" value={String(events.length)}/><Info title="Replay status" value={overview.summary.all_replays_equivalent ? "Equivalent" : "Needs review"}/></div><div className="hash-block"><span>RECORD SHA-256</span><code>{run?.sha256 ?? "—"}</code></div><EventList events={events}/></>}
+          {view === "Replay & evidence" && <><p className="surface-intro">This selected run is a deterministic portable fixture. Live ROS/Gazebo conformance is a separate, verified campaign; neither substitutes for the other.</p><div className="info-grid"><Info title="Portable outcome" value={run?.payload.outcome ?? "—"}/><Info title="Reason" value={run?.payload.reason ?? "—"}/><Info title="Events" value={String(events.length)}/><Info title="Portable replay" value={overview.summary.all_replays_equivalent ? "Equivalent" : "Needs review"}/><Info title="Live ROS campaign" value={rosEvidence?.status === "verified" ? `${rosEvidence.clean_bringups}/12 clean bringups` : "Not yet verified"}/><Info title="Live E-stop invariant" value={rosEvidence?.status === "verified" && rosEvidence.estop_to_recovery_zero_motion ? "Zero motion verified" : "Not yet verified"}/></div><div className="hash-block"><span>PORTABLE RECORD SHA-256</span><code>{run?.sha256 ?? "—"}</code></div>{rosEvidence?.status === "verified" && <div className="hash-block"><span>LIVE ROS IMAGE DIGEST</span><code>{rosEvidence.image_id}</code></div>}<EventList events={events}/></>}
         </div>
         <footer>ASTERIA SYSTEMS LAB · SYNTHETIC ENVIRONMENT · NO HARDWARE COMMANDS</footer>
       </>}

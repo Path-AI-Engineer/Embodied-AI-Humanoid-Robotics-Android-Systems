@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -10,6 +11,7 @@ from urllib.parse import urlparse
 
 from .cli import ROOT, evaluate, run
 from .evidence import canonical
+from .ros_campaign import verify_campaign
 
 
 OUT = ROOT / "reports" / "local"
@@ -31,6 +33,26 @@ class WorkbenchHandler(BaseHTTPRequestHandler):
         path = urlparse(self.path).path
         if path == "/healthz":
             self._send(200, {"status": "ok", "mode": "local-sim-only"})
+            return
+        if path == "/api/ros-evidence":
+            campaign = OUT / "ros-bringup-campaign" / "final.json"
+            if not campaign.is_file():
+                self._send(
+                    200, {"status": "not_available", "evidence_kind": "live_ros_gazebo"}
+                )
+                return
+            try:
+                payload = json.loads(campaign.read_text(encoding="utf-8-sig"))
+                if not isinstance(payload, dict):
+                    raise ValueError("ROS campaign must be a JSON object")
+                profile_hash = hashlib.sha256(
+                    (ROOT / "configs" / "robotics-profile.lock").read_bytes()
+                ).hexdigest()
+                summary = verify_campaign(payload, expected_profile_sha256=profile_hash)
+            except (OSError, ValueError, TypeError) as error:
+                self._send(503, {"status": "invalid", "detail": str(error)})
+                return
+            self._send(200, summary)
             return
         if path == "/api/overview":
             try:

@@ -1,0 +1,12 @@
+.venv/
+reports/local/
+apps/workbench/node_modules/
+apps/workbench/.next/
+apps/workbench/test-results/
+apps/workbench/playwright-report/
+**/__pycache__/
+**/*.pyc
+**/build/
+**/install/
+**/log/
+.git/

@@ -73,6 +73,8 @@ def replay_equivalent(
 ) -> bool:
     from .executive import run_mission
 
-    return record == build_record(
-        scenario, run_mission(scenario), profile_sha256=profile_sha256
+    # Evidence is persisted as canonical JSON. Python tuples in an in-memory
+    # mission become lists when read back; compare the persisted representation.
+    return canonical(record) == canonical(
+        build_record(scenario, run_mission(scenario), profile_sha256=profile_sha256)
     )

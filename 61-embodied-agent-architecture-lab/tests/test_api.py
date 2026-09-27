@@ -30,6 +30,11 @@ class WorkbenchApiTests(unittest.TestCase):
         with urlopen(self.base + "/api/runs/mission-000", timeout=3) as response:
             record = json.load(response)
         self.assertEqual(record["payload"]["outcome"], "SUCCESS")
+        with urlopen(self.base + "/api/ros-evidence", timeout=3) as response:
+            ros_evidence = json.load(response)
+        self.assertIn(ros_evidence["status"], ("verified", "not_available"))
+        if ros_evidence["status"] == "verified":
+            self.assertEqual(ros_evidence["clean_bringups"], 12)
 
     def test_only_development_fixture_can_run(self) -> None:
         request = Request(

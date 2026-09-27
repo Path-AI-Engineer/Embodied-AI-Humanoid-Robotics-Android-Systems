@@ -18,9 +18,9 @@ $env:EMBODIED_PROJECT_ROOT = $projectRoot
 Push-Location $projectRoot
 try {
     Write-Host '  -> Ruff lint and format' -ForegroundColor Cyan
-    & $Python -m ruff check src tests scripts embodied_observation embodied_goals embodied_safety embodied_skills embodied_executive
+    & $Python -m ruff check src tests scripts astra_bringup embodied_observation embodied_goals embodied_safety embodied_skills embodied_executive astra_moveit_config
     Assert-Exit 'Ruff lint'
-    & $Python -m ruff format --check src tests scripts embodied_observation embodied_goals embodied_safety embodied_skills embodied_executive
+    & $Python -m ruff format --check src tests scripts astra_bringup embodied_observation embodied_goals embodied_safety embodied_skills embodied_executive astra_moveit_config
     Assert-Exit 'Ruff format'
     Write-Host '  -> Development scenario evaluation' -ForegroundColor Cyan
     & $Python -m embodied.cli evaluate --split development --out reports/local

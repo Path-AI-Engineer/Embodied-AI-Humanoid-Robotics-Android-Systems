@@ -9,18 +9,21 @@ import time
 import rclpy
 from astra_interfaces.action import SkillInvocation
 from astra_interfaces.msg import EntityState, PolicyDecision, SafetyState
-from builtin_interfaces.msg import Duration
 from control_msgs.action import FollowJointTrajectory
+from control_msgs.msg import JointTrajectoryControllerState
+from moveit_msgs.msg import Constraints, JointConstraint
+from moveit_msgs.srv import GetMotionPlan
 from rclpy.action import ActionClient, ActionServer, CancelResponse, GoalResponse
 from rclpy.callback_groups import ReentrantCallbackGroup
 from rclpy.executors import MultiThreadedExecutor
 from rclpy.node import Node
 from rclpy.qos import DurabilityPolicy, QoSProfile, ReliabilityPolicy
+from sensor_msgs.msg import JointState
 from std_msgs.msg import Bool
-from trajectory_msgs.msg import JointTrajectoryPoint
 
 
 MISSION_ID = re.compile(r"^[a-z0-9][a-z0-9-]{1,63}$")
+ARM_JOINTS = [f"arm_joint_{joint}" for joint in range(1, 7)]
 
 
 class ArmControlGateway(Node):
@@ -28,12 +31,16 @@ class ArmControlGateway(Node):
         super().__init__("arm_control_gateway")
         self.lock = threading.RLock()
         self.running = False
-        self.policy = None
-        self.policy_wall = 0.0
+        self.policies = {}
         self.safety = None
         self.safety_wall = 0.0
         self.target = None
         self.target_wall = 0.0
+        self.joints = None
+        self.joints_wall = 0.0
+        self.joint_messages = 0
+        self.controller_state_messages = 0
+        self.joint_names_seen = ()
         callbacks = ReentrantCallbackGroup()
         durable = QoSProfile(
             depth=4,
@@ -56,12 +63,26 @@ class ArmControlGateway(Node):
         )
         self.create_subscription(
             EntityState,
-            "/astra/world/entities",
+            "/astra/world/object_target",
             self.on_target,
             8,
             callback_group=callbacks,
         )
         self.disarm = self.create_publisher(Bool, "/astra/safety/arm", 1)
+        self.create_subscription(
+            JointState,
+            "/joint_states",
+            self.on_joints,
+            QoSProfile(depth=4, reliability=ReliabilityPolicy.BEST_EFFORT),
+            callback_group=callbacks,
+        )
+        self.create_subscription(
+            JointTrajectoryControllerState,
+            "/arm_controller/controller_state",
+            self.on_controller_state,
+            QoSProfile(depth=4, reliability=ReliabilityPolicy.RELIABLE),
+            callback_group=callbacks,
+        )
         self.controller = ActionClient(
             self,
             FollowJointTrajectory,
@@ -80,8 +101,10 @@ class ArmControlGateway(Node):
 
     def on_policy(self, message):
         with self.lock:
-            self.policy = message
-            self.policy_wall = time.monotonic()
+            self.policies[message.mission_id] = (message, time.monotonic())
+            if len(self.policies) > 64:
+                oldest = min(self.policies, key=lambda key: self.policies[key][1])
+                del self.policies[oldest]
 
     def on_safety(self, message):
         with self.lock:
@@ -93,6 +116,44 @@ class ArmControlGateway(Node):
             with self.lock:
                 self.target = message
                 self.target_wall = time.monotonic()
+
+    def log_stale_target(self):
+        with self.lock:
+            target = self.target
+            target_wall = self.target_wall
+        wall_age = round(time.monotonic() - target_wall, 3) if target_wall else None
+        sim_remaining = None
+        if target is not None:
+            valid_ns = target.valid_until.sec * 10**9 + target.valid_until.nanosec
+            sim_remaining = round(
+                (valid_ns - self.get_clock().now().nanoseconds) / 1e9, 3
+            )
+        self.get_logger().warning(
+            f"object target stale: wall_age={wall_age} "
+            f"sim_remaining={sim_remaining} "
+            f"publishers={self.count_publishers('/astra/world/object_target')}"
+        )
+
+    def on_joints(self, message):
+        by_name = dict(zip(message.name, message.position, strict=False))
+        with self.lock:
+            self.joint_messages += 1
+            self.joint_names_seen = tuple(message.name)
+        if all(name in by_name and math.isfinite(by_name[name]) for name in ARM_JOINTS):
+            with self.lock:
+                self.joints = [by_name[name] for name in ARM_JOINTS]
+                self.joints_wall = time.monotonic()
+
+    def on_controller_state(self, message):
+        by_name = dict(
+            zip(message.joint_names, message.feedback.positions, strict=False)
+        )
+        with self.lock:
+            self.controller_state_messages += 1
+        if all(name in by_name and math.isfinite(by_name[name]) for name in ARM_JOINTS):
+            with self.lock:
+                self.joints = [by_name[name] for name in ARM_JOINTS]
+                self.joints_wall = time.monotonic()
 
     def accept_goal(self, request):
         stamp = request.requested_at.sec * 10**9 + request.requested_at.nanosec
@@ -109,7 +170,11 @@ class ArmControlGateway(Node):
             or not -0.05 <= age <= 1.0
         ):
             return GoalResponse.REJECT
-        if self.authorized(request.mission_id)[1] != "OK":
+        _, authorization = self.authorized(request.mission_id)
+        if authorization != "OK":
+            self.get_logger().warning(
+                f"point_at goal rejected mission={request.mission_id} reason={authorization}"
+            )
             return GoalResponse.REJECT
         with self.lock:
             if self.running:
@@ -119,8 +184,7 @@ class ArmControlGateway(Node):
 
     def authorized(self, mission_id):
         with self.lock:
-            policy = self.policy
-            policy_wall = self.policy_wall
+            policy, policy_wall = self.policies.get(mission_id, (None, 0.0))
             safety = self.safety
             safety_wall = self.safety_wall
             target = self.target
@@ -168,6 +232,139 @@ class ArmControlGateway(Node):
             return None, "INVALID_TARGET"
         return max(-0.4, min(0.4, math.atan2(x, z))), "OK"
 
+    def plan(self, goal_handle, bearing, deadline):
+        joint_deadline = min(deadline, time.monotonic() + 2.0)
+        while True:
+            with self.lock:
+                joints = self.joints
+                joints_wall = self.joints_wall
+            if joints is not None and time.monotonic() - joints_wall <= 0.5:
+                break
+            if goal_handle.is_cancel_requested:
+                return None, "CANCELED", "operator_cancel_waiting_for_joint_state"
+            if self.authorized(goal_handle.request.mission_id)[1] != "OK":
+                return None, "SAFETY_STOP", "authorization_lost_waiting_for_joint_state"
+            if time.monotonic() >= joint_deadline:
+                with self.lock:
+                    messages = self.joint_messages
+                    controller_messages = self.controller_state_messages
+                    names = self.joint_names_seen
+                age = round(time.monotonic() - joints_wall, 3) if joints_wall else None
+                return (
+                    None,
+                    "STALE_JOINT_STATE",
+                    f"arm_joint_state_unavailable:messages={messages}:"
+                    f"controller_messages={controller_messages}:"
+                    f"age={age}:publishers={self.count_publishers('/joint_states')}:"
+                    f"names={names}",
+                )
+            time.sleep(0.02)
+        target = [bearing, -0.25, 0.45, 0.0, 0.0, 0.0]
+        request = GetMotionPlan.Request()
+        motion = request.motion_plan_request
+        motion.group_name = "arm"
+        motion.pipeline_id = "ompl"
+        motion.num_planning_attempts = 2
+        motion.allowed_planning_time = 2.0
+        motion.start_state.joint_state.name = ARM_JOINTS
+        motion.start_state.joint_state.position = joints
+        motion.start_state.is_diff = False
+        constraints = Constraints()
+        for name, position in zip(ARM_JOINTS, target, strict=True):
+            joint = JointConstraint()
+            joint.joint_name = name
+            joint.position = position
+            joint.tolerance_above = 0.02
+            joint.tolerance_below = 0.02
+            joint.weight = 1.0
+            constraints.joint_constraints.append(joint)
+        motion.goal_constraints = [constraints]
+        # Give planning its own ROS node/participant. The standalone planning
+        # probe can discover MoveIt even when the gateway participant sees the
+        # service name but cannot match its client endpoint.
+        planner_node = rclpy.create_node("astra_arm_planning_client")
+        try:
+            planner = planner_node.create_client(GetMotionPlan, "/plan_kinematic_path")
+            while not planner.wait_for_service(timeout_sec=0.1):
+                if goal_handle.is_cancel_requested:
+                    return None, "CANCELED", "operator_cancel_waiting_for_moveit"
+                authorization = self.authorized(goal_handle.request.mission_id)[1]
+                if authorization != "OK":
+                    if authorization == "STALE_TARGET":
+                        self.log_stale_target()
+                    return (
+                        None,
+                        authorization,
+                        f"authorization_lost_waiting_for_moveit:{authorization}",
+                    )
+                if time.monotonic() >= deadline:
+                    services = [
+                        (name, types)
+                        for name, types in planner_node.get_service_names_and_types()
+                        if "plan_kinematic_path" in name
+                    ]
+                    self.get_logger().warning(
+                        f"moveit service not discovered by planning node: {services}"
+                    )
+                    return (
+                        None,
+                        "PLANNER_UNAVAILABLE",
+                        "moveit_planning_service_missing",
+                    )
+            future = planner.call_async(request)
+            while not future.done() and time.monotonic() < deadline:
+                rclpy.spin_once(planner_node, timeout_sec=0.02)
+                if goal_handle.is_cancel_requested:
+                    future.cancel()
+                    return None, "CANCELED", "operator_cancel_during_planning"
+                authorization = self.authorized(goal_handle.request.mission_id)[1]
+                if authorization != "OK":
+                    if authorization == "STALE_TARGET":
+                        self.log_stale_target()
+                    future.cancel()
+                    return (
+                        None,
+                        authorization,
+                        f"authorization_lost_during_planning:{authorization}",
+                    )
+            if not future.done():
+                future.cancel()
+                return None, "TIMEOUT", "moveit_planning_deadline_exceeded"
+            try:
+                response = future.result().motion_plan_response
+            except Exception as exc:
+                return (
+                    None,
+                    "PLANNER_FAILED",
+                    f"moveit_service_error:{type(exc).__name__}",
+                )
+        finally:
+            planner_node.destroy_node()
+        trajectory = response.trajectory.joint_trajectory
+        if response.error_code.val != 1 or trajectory.joint_names != ARM_JOINTS:
+            return None, "PLANNER_FAILED", f"moveit_result_{response.error_code.val}"
+        points = trajectory.points
+        if len(points) < 2:
+            return None, "PLANNER_FAILED", "moveit_trajectory_too_short"
+        for point in points:
+            if len(point.positions) != 6 or any(
+                not math.isfinite(position) or abs(position) > 1.5
+                for position in point.positions
+            ):
+                return None, "PLANNER_FAILED", "moveit_joint_limits_invalid"
+        if any(
+            abs(actual - expected) > 0.03
+            for actual, expected in zip(points[-1].positions, target, strict=True)
+        ):
+            return None, "PLANNER_FAILED", "moveit_goal_not_reached"
+        duration = (
+            points[-1].time_from_start.sec + points[-1].time_from_start.nanosec / 1e9
+        )
+        if duration <= 0 or duration > max(0, deadline - time.monotonic()):
+            return None, "PLANNER_FAILED", "moveit_trajectory_exceeds_deadline"
+        trajectory.header.stamp = self.get_clock().now().to_msg()
+        return trajectory, "OK", "moveit_plan_validated"
+
     def execute(self, goal_handle):
         request = goal_handle.request
         deadline = time.monotonic() + request.timeout_seconds
@@ -180,17 +377,13 @@ class ArmControlGateway(Node):
             bearing, code = self.authorized(request.mission_id)
             if code != "OK":
                 reason = "arm_gateway_precondition_failed"
-            elif not self.controller.wait_for_server(timeout_sec=1.0):
-                code, reason = "CONTROL_ADAPTER_UNAVAILABLE", "arm_controller_missing"
             else:
+                trajectory, code, reason = self.plan(goal_handle, bearing, deadline)
+            if code == "OK" and not self.controller.wait_for_server(timeout_sec=1.0):
+                code, reason = "CONTROL_ADAPTER_UNAVAILABLE", "arm_controller_missing"
+            if code == "OK":
                 command = FollowJointTrajectory.Goal()
-                command.trajectory.joint_names = [
-                    f"arm_joint_{joint}" for joint in range(1, 7)
-                ]
-                point = JointTrajectoryPoint()
-                point.positions = [bearing, -0.25, 0.45, 0.0, 0.0, 0.0]
-                point.time_from_start = Duration(sec=2)
-                command.trajectory.points = [point]
+                command.trajectory = trajectory
                 accepted = self.controller.send_goal_async(command)
                 while time.monotonic() < deadline:
                     if goal_handle.is_cancel_requested:
@@ -198,7 +391,16 @@ class ArmControlGateway(Node):
                         break
                     _, authorization = self.authorized(request.mission_id)
                     if authorization != "OK":
-                        code, reason = authorization, "arm_gateway_authorization_lost"
+                        with self.lock:
+                            safety_reason = (
+                                self.safety.reason
+                                if self.safety is not None
+                                else "none"
+                            )
+                        code, reason = (
+                            authorization,
+                            f"arm_gateway_authorization_lost:{safety_reason}",
+                        )
                         break
                     if controller_goal is None and accepted.done():
                         controller_goal = accepted.result()
@@ -223,8 +425,33 @@ class ArmControlGateway(Node):
                         and accepted.done()
                     ):
                         controller_goal = accepted.result()
-                    if controller_goal is not None and controller_goal.accepted:
-                        controller_goal.cancel_goal_async()
+                    if (
+                        controller_goal is not None
+                        and controller_goal.accepted
+                        and (result_future is None or not result_future.done())
+                    ):
+                        cancellation = controller_goal.cancel_goal_async()
+                        cancel_deadline = time.monotonic() + 1.0
+                        while (
+                            not cancellation.done()
+                            and time.monotonic() < cancel_deadline
+                        ):
+                            time.sleep(0.02)
+                        if not cancellation.done():
+                            code, reason = (
+                                "CONTROL_CANCEL_UNCONFIRMED",
+                                "arm_controller_cancel_timeout",
+                            )
+                        else:
+                            try:
+                                canceled_goals = cancellation.result().goals_canceling
+                            except Exception:
+                                canceled_goals = []
+                            if not canceled_goals:
+                                code, reason = (
+                                    "CONTROL_CANCEL_UNCONFIRMED",
+                                    "arm_controller_cancel_rejected",
+                                )
             self.disarm.publish(Bool(data=False))
             if code == "OK":
                 settled_by = time.monotonic() + 2.0

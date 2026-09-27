@@ -77,6 +77,13 @@ def arm_with_fresh_policy(node, goal):
     """Retry the asynchronous goal/arm handshake without bypassing the gateway."""
     deadline = time.monotonic() + 8.0
     next_request = 0.0
+    next_intent = 0.0
+    zero = ControlIntent()
+    zero.schema_version = "astra.control-intent.v1"
+    zero.mission_id = goal.mission_id
+    zero.frame_id = "base_link"
+    zero.clock_domain = "sim"
+    zero.ttl_seconds = 0.2
     while time.monotonic() < deadline:
         now = time.monotonic()
         if now >= next_request and node.states:
@@ -84,6 +91,11 @@ def arm_with_fresh_policy(node, goal):
             node.goals.publish(goal)
             node.arm.publish(Bool(data=True))
             next_request = now + 0.2
+        # A zero command is still a heartbeat once the safety gateway arms.
+        if now >= next_intent and node.states:
+            zero.issued_at = node.states[-1].observed_at
+            node.intent.publish(zero)
+            next_intent = now + 0.08
         rclpy.spin_once(node, timeout_sec=0.05)
         if node.states and node.states[-1].mode == "ACTIVE":
             return
@@ -115,7 +127,7 @@ def request_decision(node, goal, expected):
 
 
 def send_fresh_intent(node, intent):
-    intent.issued_at = node.get_clock().now().to_msg()
+    intent.issued_at = node.states[-1].observed_at
     node.intent.publish(intent)
 
 
@@ -195,12 +207,16 @@ def main():
         request_decision(node, goal, lambda decision: decision.allowed)
         goal.station_id = "restricted-station"
         goal.approved_restricted_zone = True
-        request_decision(
-            node,
-            goal,
-            lambda decision: decision.result_code == "APPROVAL_REQUIRED"
-            and not decision.allowed,
-        )
+        # Preserve more than one independent denial event in the rosbag. The
+        # live decision must pass each time; a single lost transport sample
+        # must not erase the policy boundary from recorded evidence.
+        for _ in range(3):
+            request_decision(
+                node,
+                goal,
+                lambda decision: decision.result_code == "APPROVAL_REQUIRED"
+                and not decision.allowed,
+            )
         goal.station_id = "inspection-station"
         goal.approved_restricted_zone = False
         request_decision(node, goal, lambda decision: decision.allowed)
@@ -223,6 +239,47 @@ def main():
         send_fresh_intent(node, intent)
         node.until(lambda: len(node.commands) > zero_index)
         assert all(c.linear.x == 0.0 for c in node.commands[zero_index:])
+        node.recover.publish(Bool(data=True))
+        node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
+        request_decision(node, goal, lambda decision: decision.allowed)
+        arm_with_fresh_policy(node, goal)
+        zero = ControlIntent()
+        zero.schema_version = intent.schema_version
+        zero.mission_id = intent.mission_id
+        zero.frame_id = intent.frame_id
+        zero.clock_domain = intent.clock_domain
+        zero.ttl_seconds = 0.2
+        send_fresh_intent(node, zero)
+        stale_zero = ControlIntent()
+        stale_zero.schema_version = zero.schema_version
+        stale_zero.mission_id = zero.mission_id
+        stale_zero.frame_id = zero.frame_id
+        stale_zero.clock_domain = zero.clock_domain
+        stale_zero.ttl_seconds = zero.ttl_seconds
+        stale_zero.issued_at.sec = node.states[-1].observed_at.sec - 1
+        stale_zero.issued_at.nanosec = node.states[-1].observed_at.nanosec
+        node.intent.publish(stale_zero)
+        send_fresh_intent(node, zero)
+        for _ in range(3):
+            rclpy.spin_once(node, timeout_sec=0.02)
+        assert node.states[-1].mode == "ACTIVE", (
+            f"stale zero intent latched stop: {node.states[-1]}"
+        )
+        stale_move = ControlIntent()
+        stale_move.schema_version = intent.schema_version
+        stale_move.mission_id = intent.mission_id
+        stale_move.frame_id = intent.frame_id
+        stale_move.clock_domain = intent.clock_domain
+        stale_move.ttl_seconds = 0.2
+        stale_move.linear_meters_per_second = 0.12
+        stale_move.issued_at.sec = node.states[-1].observed_at.sec - 1
+        stale_move.issued_at.nanosec = node.states[-1].observed_at.nanosec
+        node.intent.publish(stale_move)
+        node.until(
+            lambda: node.states
+            and node.states[-1].mode == "PROTECTIVE_STOP"
+            and node.states[-1].reason == "stale_or_future_nonzero_intent"
+        )
         node.recover.publish(Bool(data=True))
         node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
         request_decision(node, goal, lambda decision: decision.allowed)
@@ -251,6 +308,8 @@ def main():
                     "estop_latch": "verified",
                     "explicit_recovery": "verified",
                     "speed_limit": "verified",
+                    "stale_zero_discarded_without_heartbeat_renewal": "verified",
+                    "stale_nonzero_stopped": "verified",
                     "arm_gateway_policy_bypass": "rejected",
                 }
             )

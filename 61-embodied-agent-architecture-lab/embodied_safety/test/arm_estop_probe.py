@@ -1,6 +1,7 @@
 """Inject E-stop during a real arm trajectory and measure simulated settling."""
 
 import json
+import threading
 import time
 
 import rclpy
@@ -33,6 +34,8 @@ class ArmStopProbe(Probe):
         self.zero_intent.clock_domain = "sim"
         self.zero_intent.ttl_seconds = 0.2
         self.last_pulse = 0.0
+        self.heartbeat_stop = threading.Event()
+        self.heartbeat_thread = None
 
     def on_joints(self, message):
         speeds = [
@@ -47,11 +50,31 @@ class ArmStopProbe(Probe):
         now = time.monotonic()
         if now - self.last_pulse < 0.1:
             return
-        goal.requested_at = self.get_clock().now().to_msg()
+        goal.requested_at = self.states[-1].observed_at
         self.goals.publish(goal)
         self.zero_intent.issued_at = goal.requested_at
         self.intent.publish(self.zero_intent)
         self.last_pulse = now
+
+    def start_heartbeat(self, goal):
+        """Keep the zero-motion intent alive during blocking action admission."""
+        self.heartbeat_stop.clear()
+
+        def publish_until_stopped():
+            while not self.heartbeat_stop.is_set():
+                self.pulse(goal)
+                self.heartbeat_stop.wait(0.04)
+
+        self.heartbeat_thread = threading.Thread(
+            target=publish_until_stopped, name="arm-stop-zero-heartbeat", daemon=True
+        )
+        self.heartbeat_thread.start()
+
+    def stop_heartbeat(self):
+        self.heartbeat_stop.set()
+        if self.heartbeat_thread is not None:
+            self.heartbeat_thread.join(timeout=1.0)
+            self.heartbeat_thread = None
 
 
 def main():
@@ -71,6 +94,7 @@ def main():
         goal.clock_domain = "sim"
         goal.ttl_seconds = 0.8
         arm_with_fresh_policy(node, goal)
+        node.start_heartbeat(goal)
 
         request = SkillInvocation.Goal()
         request.schema_version = "astra.skill-invocation.v1"
@@ -79,26 +103,41 @@ def main():
         request.target_id = "object-00"
         request.frame_id = "map"
         request.clock_domain = "sim"
-        request.requested_at = node.get_clock().now().to_msg()
-        request.timeout_seconds = 5.0
-        sent = node.arm_action.send_goal_async(request)
-        start = time.monotonic()
-        while not sent.done() and time.monotonic() - start < 3:
-            node.pulse(goal)
-            rclpy.spin_once(node, timeout_sec=0.03)
-        assert sent.done() and sent.result().accepted, "arm goal not accepted"
-        handle = sent.result()
+        request.timeout_seconds = 10.0
+        handle = None
+        admission_deadline = time.monotonic() + 4.0
+        while time.monotonic() < admission_deadline and handle is None:
+            request.requested_at = node.states[-1].observed_at
+            sent = node.arm_action.send_goal_async(request)
+            while not sent.done() and time.monotonic() < admission_deadline:
+                rclpy.spin_once(node, timeout_sec=0.03)
+            if sent.done() and sent.result().accepted:
+                handle = sent.result()
+                break
+            if node.states and node.states[-1].mode != "ACTIVE":
+                break
+        assert handle is not None, (
+            "arm goal not accepted while ACTIVE; "
+            f"safety={node.states[-1] if node.states else 'none'}; "
+            f"policy={node.decisions[-1] if node.decisions else 'none'}"
+        )
         result = handle.get_result_async()
 
-        moving_by = time.monotonic() + 2
+        moving_by = time.monotonic() + 11
         while time.monotonic() < moving_by:
-            node.pulse(goal)
             rclpy.spin_once(node, timeout_sec=0.02)
             if node.samples and node.samples[-1][1] > 0.08:
                 break
         else:
-            raise AssertionError("arm never moved before E-stop injection")
+            outcome = result.result().result.result_code if result.done() else "pending"
+            raise AssertionError(
+                "arm never moved before E-stop injection; "
+                f"result={outcome}; "
+                f"peak_speed={max((speed for _, speed in node.samples), default=0.0)}; "
+                f"safety={node.states[-1] if node.states else 'none'}"
+            )
 
+        node.stop_heartbeat()
         node.estop.publish(Bool(data=True))
         node.until(
             lambda: node.states
@@ -107,19 +146,37 @@ def main():
             2,
         )
         observed_stop = time.monotonic()
+        settle_by = observed_stop + 1.0
+        settled = None
+        quiet_since = None
+        while time.monotonic() < settle_by:
+            rclpy.spin_once(node, timeout_sec=0.02)
+            if node.samples:
+                sample_at, speed = node.samples[-1]
+                if speed <= 0.05:
+                    if quiet_since is None:
+                        quiet_since = sample_at
+                    if sample_at - quiet_since >= 0.15:
+                        settled = sample_at
+                        break
+                else:
+                    quiet_since = None
+        if settled is None:
+            after_stop = [
+                (round(stamp - observed_stop, 3), round(speed, 4))
+                for stamp, speed in node.samples
+                if stamp >= observed_stop
+            ]
+            raise AssertionError(
+                "arm stop was not observed within one wall second; "
+                f"samples_after_estop={len(after_stop)}; "
+                f"first_last={after_stop[:3]}:{after_stop[-3:]}; "
+                f"last_joint_age={time.monotonic() - node.samples[-1][0]:.3f}s"
+            )
         node.until(lambda: result.done(), 3)
         assert result.result().result.result_code != "OK", (
             "arm reported success after E-stop"
         )
-
-        settle_by = observed_stop + 1.0
-        settled = None
-        while time.monotonic() < settle_by:
-            rclpy.spin_once(node, timeout_sec=0.02)
-            if node.samples and node.samples[-1][1] <= 0.05:
-                settled = time.monotonic()
-                break
-        assert settled is not None, "arm velocity did not settle within one wall second"
         hold_until = time.monotonic() + 0.4
         while time.monotonic() < hold_until:
             rclpy.spin_once(node, timeout_sec=0.02)
@@ -139,6 +196,7 @@ def main():
             )
         )
     finally:
+        node.stop_heartbeat()
         node.destroy_node()
         rclpy.shutdown()
 

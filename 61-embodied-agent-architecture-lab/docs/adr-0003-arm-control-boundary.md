@@ -1,6 +1,7 @@
 # ADR 0003 — Simulated arm control remains a restricted prototype
 
-Status: accepted for local simulation experiments; not approved for release.
+Status: historical local-simulation checkpoint; planning details superseded by
+[ADR 0004](adr-0004-moveit-planning-only.md); not approved for release.
 
 The six Astra arm joints are exposed through `gz_ros2_control` and an active
 `JointTrajectoryController`. The `point_at` skill now invokes an independent

@@ -276,7 +276,13 @@ class SkillServer(Node):
         intent.mission_id = mission_id
         intent.frame_id = "base_link"
         intent.clock_domain = "sim"
-        intent.issued_at = self.get_clock().now().to_msg()
+        with self.lock:
+            safety = self.safety
+        intent.issued_at = (
+            safety.observed_at
+            if safety is not None
+            else self.get_clock().now().to_msg()
+        )
         intent.ttl_seconds = 0.2
         intent.linear_meters_per_second = float(linear)
         intent.angular_radians_per_second = float(angular)
@@ -349,9 +355,11 @@ class SkillServer(Node):
                 )
             if abs(error) <= 0.06:
                 centered += 1
+                # point_at follows alignment in the reference mission. Keep
+                # authorization alive until the operator or arm gateway
+                # explicitly releases it after the handoff.
                 self.send_intent(mission_id)
                 if centered >= 3:
-                    self.zero_intent(mission_id)
                     return "OK", "rgbd_target_centered_with_odometry_and_safety"
             else:
                 centered = 0
@@ -402,7 +410,11 @@ class SkillServer(Node):
             safety = self.safety_state()
             if safety == "STOPPED":
                 self.zero_intent(mission_id)
-                return "SAFETY_STOP", "safety_supervisor_latched_stop"
+                with self.lock:
+                    stop_reason = (
+                        self.safety.reason if self.safety is not None else "none"
+                    )
+                return "SAFETY_STOP", f"safety_supervisor_latched_stop:{stop_reason}"
             if safety != "READY":
                 self.send_intent(mission_id)
                 time.sleep(0.05)
@@ -506,7 +518,13 @@ class SkillServer(Node):
         forwarded.target_id = request.target_id
         forwarded.frame_id = request.frame_id
         forwarded.clock_domain = request.clock_domain
-        forwarded.requested_at = self.get_clock().now().to_msg()
+        with self.lock:
+            safety = self.safety
+        forwarded.requested_at = (
+            safety.observed_at
+            if safety is not None
+            else self.get_clock().now().to_msg()
+        )
         forwarded.timeout_seconds = min(request.timeout_seconds, 10.0)
         accepted = self.arm_client.send_goal_async(forwarded)
         controller_goal = None

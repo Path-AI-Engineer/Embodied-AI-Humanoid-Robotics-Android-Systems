@@ -10,6 +10,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 FREEZE = ROOT / "data" / "manifests" / "evaluation-freeze.v1.json"
 SCOPE = (
+    ".dockerignore",
     "Dockerfile.ros",
     "pyproject.toml",
     "apps/workbench/package.json",
@@ -28,6 +29,7 @@ TREES = (
     "astra_interfaces",
     "astra_description",
     "astra_simulation",
+    "astra_moveit_config",
     "astra_bringup",
     "embodied_observation",
     "embodied_goals",

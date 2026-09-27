@@ -22,15 +22,25 @@ class WorldModel(LifecycleNode):
         super().__init__("world_model")
         self.active = False
         self.facts = {}
+        self.intake_counts = {}
+        self.last_object_age_seconds = None
         self.entities = self.create_lifecycle_publisher(
             EntityState, "/astra/world/entities", 8
+        )
+        self.object_target = self.create_lifecycle_publisher(
+            EntityState,
+            "/astra/world/object_target",
+            QoSProfile(depth=8, reliability=ReliabilityPolicy.RELIABLE),
         )
         self.deltas = self.create_lifecycle_publisher(
             WorldDelta, "/astra/world/delta", 8
         )
-        sensor_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
-        self.percepts = self.create_subscription(
-            Percept, "/astra/perception/percepts", self.on_percept, sensor_qos
+        percept_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.RELIABLE)
+        self.camera_percepts = self.create_subscription(
+            Percept, "/astra/perception/camera", self.on_percept, percept_qos
+        )
+        self.lidar_percepts = self.create_subscription(
+            Percept, "/astra/perception/lidar", self.on_percept, percept_qos
         )
         self.timer = self.create_timer(0.1, self.evict_stale)
 
@@ -40,15 +50,18 @@ class WorldModel(LifecycleNode):
 
     def on_activate(self, state):
         self.active = True
+        self.get_logger().info("world_lifecycle activated")
         return super().on_activate(state)
 
     def on_deactivate(self, state):
         self.active = False
         self.facts.clear()
+        self.get_logger().info("world_lifecycle deactivated")
         return super().on_deactivate(state)
 
     def on_percept(self, percept):
         if not self.active:
+            self.record_intake(percept.entity_id, "inactive")
             return
         if (
             percept.schema_version != "astra.percept.v1"
@@ -62,10 +75,15 @@ class WorldModel(LifecycleNode):
             or not math.isfinite(percept.pose.pose.position.z)
             or not 0 < percept.ttl_seconds <= 0.25
         ):
+            self.record_intake(percept.entity_id, "contract_rejected")
             return
         observed_ns = percept.observed_at.sec * 10**9 + percept.observed_at.nanosec
         now_ns = self.get_clock().now().nanoseconds
-        if not -0.05 <= (now_ns - observed_ns) / 10**9 <= percept.ttl_seconds:
+        age_seconds = (now_ns - observed_ns) / 10**9
+        if percept.entity_id == "object-00":
+            self.last_object_age_seconds = age_seconds
+        if not -0.05 <= age_seconds <= percept.ttl_seconds:
+            self.record_intake(percept.entity_id, "freshness_rejected")
             return
         # The red fiducial is fixed in this synthetic world. Percept intake
         # still requires a <=250 ms source sample, while the derived entity
@@ -85,7 +103,22 @@ class WorldModel(LifecycleNode):
         entity.provenance = percept.source_topic
         self.facts[entity.entity_id] = entity
         self.entities.publish(entity)
+        if entity.entity_id == "object-00":
+            self.object_target.publish(entity)
+        self.record_intake(percept.entity_id, "accepted")
         self.publish_delta([entity.entity_id], [], entity.frame_id, entity.provenance)
+
+    def record_intake(self, entity_id, outcome):
+        entity = entity_id if entity_id in PERCEPT_SOURCES else "other"
+        key = f"{entity}:{outcome}"
+        self.intake_counts[key] = self.intake_counts.get(key, 0) + 1
+        total = sum(self.intake_counts.values())
+        if total % 100 == 0:
+            self.get_logger().info(
+                "world_intake "
+                f"total={total} counts={self.intake_counts} "
+                f"last_object_age_seconds={self.last_object_age_seconds}"
+            )
 
     def evict_stale(self):
         if not self.active:

@@ -17,7 +17,7 @@ from embodied.contracts import (
     Stamp,
 )
 from embodied.cli import evaluate, run
-from embodied.evidence import build_record, replay_equivalent, verify_record
+from embodied.evidence import build_record, canonical, replay_equivalent, verify_record
 from embodied.executive import run_mission
 from embodied.runtime import GoalGateway
 from embodied.safety import SafetySignals, SafetySupervisor
@@ -164,21 +164,29 @@ class SafetyTests(unittest.TestCase):
 
 
 class MissionTests(unittest.TestCase):
-    def test_locked_test_split_rejects_direct_run_and_evaluation(self) -> None:
+    def test_locked_test_split_rejects_direct_run_and_unsealed_evaluation(self) -> None:
         with patch("embodied.cli.load_scenario") as load:
             with self.assertRaises(PermissionError):
                 run(ROOT / "scenarios/test/mission-064.json", ROOT / "reports/local")
-            with self.assertRaises(PermissionError):
-                run(
-                    ROOT / "scenarios/test/mission-064.json",
-                    ROOT / "reports/local",
-                    unlock_test=True,
-                )
+            with patch(
+                "embodied.cli.require_test_freeze",
+                side_effect=PermissionError("test split remains locked"),
+            ):
+                with self.assertRaises(PermissionError):
+                    run(
+                        ROOT / "scenarios/test/mission-064.json",
+                        ROOT / "reports/local",
+                        unlock_test=True,
+                    )
             load.assert_not_called()
         with self.assertRaises(PermissionError):
             evaluate("test", ROOT / "reports/local", unlock_test=False)
-        with self.assertRaises(PermissionError):
-            evaluate("test", ROOT / "reports/local", unlock_test=True)
+        with patch(
+            "embodied.cli.require_test_freeze",
+            side_effect=PermissionError("test split remains locked"),
+        ):
+            with self.assertRaises(PermissionError):
+                evaluate("test", ROOT / "reports/local", unlock_test=True)
 
     def test_direct_motor_commit_is_rejected(self) -> None:
         simulator = AstraSimulator(BASE)
@@ -199,6 +207,14 @@ class MissionTests(unittest.TestCase):
         self.assertTrue(replay_equivalent(BASE, record, profile_sha256="test"))
         record["payload"]["reason"] = "tampered"
         self.assertFalse(verify_record(record))
+
+    def test_persisted_json_replay_matches_canonical_evidence(self) -> None:
+        record = build_record(BASE, run_mission(BASE), profile_sha256="test")
+        persisted = json.loads(canonical(record))
+        self.assertTrue(verify_record(persisted))
+        self.assertTrue(replay_equivalent(BASE, persisted, profile_sha256="test"))
+        persisted["payload"]["reason"] = "tampered"
+        self.assertFalse(replay_equivalent(BASE, persisted, profile_sha256="test"))
 
     def test_restricted_zone_needs_approval(self) -> None:
         denied = run_mission(replace(BASE, restricted_zone=True))

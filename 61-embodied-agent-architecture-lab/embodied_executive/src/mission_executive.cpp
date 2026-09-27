@@ -113,8 +113,13 @@ class SkillStep final : public BT::StatefulActionNode {
   BT::NodeStatus onStart() override {
     const auto skill = getInput<std::string>("skill");
     const auto timeout = getInput<double>("timeout");
-    if (!skill || !timeout || timeout.value() <= 0 || timeout.value() > 60 ||
-        !client_->action_server_is_ready()) return BT::NodeStatus::FAILURE;
+    if (!skill || !timeout || timeout.value() <= 0 || timeout.value() > 60)
+      return BT::NodeStatus::FAILURE;
+    if (!client_->wait_for_action_server(2s)) {
+      RCLCPP_WARN(node_->get_logger(), "mission=%s skill=%s action server unavailable",
+                  mission_.c_str(), skill.value().c_str());
+      return BT::NodeStatus::FAILURE;
+    }
     Skill::Goal goal;
     goal.schema_version = "astra.skill-invocation.v1";
     goal.mission_id = mission_;

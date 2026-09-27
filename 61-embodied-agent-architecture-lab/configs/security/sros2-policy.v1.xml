@@ -47,6 +47,31 @@
             <service>~/get_type_description</service>
           </services>
         </profile>
+        <profile ns="/" node="unauthorized_arm_client">
+          <topics publish="ALLOW"><topic>rosout</topic><topic>/parameter_events</topic></topics>
+          <topics subscribe="ALLOW"><topic>/parameter_events</topic></topics>
+          <services reply="ALLOW" request="ALLOW"><service>~/get_type_description</service></services>
+        </profile>
+      </profiles>
+    </enclave>
+    <enclave path="/astra/arm_controller">
+      <profiles>
+        <profile ns="/" node="security_arm_controller">
+          <topics publish="ALLOW"><topic>rosout</topic><topic>/parameter_events</topic></topics>
+          <topics subscribe="ALLOW"><topic>/parameter_events</topic></topics>
+          <services reply="ALLOW" request="ALLOW"><service>~/get_type_description</service></services>
+          <actions execute="ALLOW"><action>/arm_controller/follow_joint_trajectory</action></actions>
+        </profile>
+      </profiles>
+    </enclave>
+    <enclave path="/astra/arm_gateway">
+      <profiles>
+        <profile ns="/" node="security_arm_gateway">
+          <topics publish="ALLOW"><topic>rosout</topic><topic>/parameter_events</topic></topics>
+          <topics subscribe="ALLOW"><topic>/parameter_events</topic></topics>
+          <services reply="ALLOW" request="ALLOW"><service>~/get_type_description</service></services>
+          <actions call="ALLOW"><action>/arm_controller/follow_joint_trajectory</action></actions>
+        </profile>
       </profiles>
     </enclave>
   </enclaves>

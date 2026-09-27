@@ -1,4 +1,4 @@
-param([Parameter(Mandatory = $true)][string]$EvidenceDirectory)
+param([Parameter(Mandatory = $true)][string]$EvidenceDirectory, [string]$Image = 'embodied-project61-ros:quality')
 
 $ErrorActionPreference = 'Stop'
 $root = Split-Path -Parent $PSScriptRoot
@@ -13,6 +13,6 @@ docker run --rm --memory=4g `
     --mount "type=bind,source=$evidence,target=/evidence,readonly" `
     --mount "type=bind,source=$replayEvidence,target=/output" `
     --mount "type=bind,source=$root,target=/task,readonly" `
-    embodied-project61-ros:quality bash /task/scripts/ros-sensor-replay.sh
+    $Image bash /task/scripts/ros-sensor-replay.sh
 if ($LASTEXITCODE -ne 0) { throw "ROS sensor replay failed with exit code $LASTEXITCODE." }
 Write-Host "Preserved sensor replay evidence: $replayEvidence" -ForegroundColor Green

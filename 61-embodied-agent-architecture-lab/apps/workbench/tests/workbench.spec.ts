@@ -11,6 +11,7 @@ test("shows real mission evidence across all architecture surfaces", async ({ pa
     await expect(page.getByRole("heading", { name, exact: true })).toBeVisible();
   }
   await expect(page.getByText("RECORD SHA-256")).toBeVisible();
+  await expect(page.getByText("Live ROS campaign")).toBeVisible();
   const viewport = await page.evaluate(() => ({ client: document.documentElement.clientWidth, scroll: document.documentElement.scrollWidth }));
   expect(viewport.scroll).toBeLessThanOrEqual(viewport.client);
 });

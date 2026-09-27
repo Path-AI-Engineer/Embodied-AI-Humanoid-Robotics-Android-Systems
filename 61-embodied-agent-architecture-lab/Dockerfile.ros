@@ -15,6 +15,10 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     ros-lyrical-joint-trajectory-controller=6.9.0-1resolute.20260915.151614 \
     ros-lyrical-joint-state-broadcaster=6.9.0-1resolute.20260915.110533 \
     ros-lyrical-behaviortree-cpp \
+    ros-lyrical-moveit-ros-move-group=2.15.2-1resolute.20260918.020818 \
+    ros-lyrical-moveit-planners-ompl=2.15.2-1resolute.20260918.020543 \
+    ros-lyrical-moveit-configs-utils=2.15.2-1resolute.20260918.005455 \
+    ros-lyrical-moveit-kinematics=2.15.2-1resolute.20260918.020337 \
     && rm -rf /var/lib/apt/lists/*
 RUN apt-get update && apt-get upgrade -y && rm -rf /var/lib/apt/lists/*
 
@@ -22,13 +26,24 @@ WORKDIR /ws
 COPY astra_interfaces /ws/src/astra_interfaces
 COPY astra_description /ws/src/astra_description
 COPY astra_simulation /ws/src/astra_simulation
-RUN bash -lc '. /opt/ros/lyrical/setup.bash && colcon build --merge-install --packages-select astra_interfaces astra_description astra_simulation --event-handlers console_direct+'
-COPY embodied_safety /ws/src/embodied_safety
+COPY astra_moveit_config/CMakeLists.txt astra_moveit_config/package.xml /ws/src/astra_moveit_config/
+COPY astra_moveit_config/config /ws/src/astra_moveit_config/config
+COPY astra_moveit_config/launch /ws/src/astra_moveit_config/launch
+RUN bash -lc '. /opt/ros/lyrical/setup.bash && colcon build --merge-install --packages-select astra_interfaces astra_description astra_simulation astra_moveit_config --event-handlers console_direct+'
+COPY embodied_safety/CMakeLists.txt embodied_safety/package.xml /ws/src/embodied_safety/
+COPY embodied_safety/src /ws/src/embodied_safety/src
 COPY embodied_observation /ws/src/embodied_observation
 COPY embodied_goals /ws/src/embodied_goals
-COPY embodied_skills /ws/src/embodied_skills
-COPY embodied_executive /ws/src/embodied_executive
+COPY embodied_skills/package.xml embodied_skills/setup.cfg embodied_skills/setup.py /ws/src/embodied_skills/
+COPY embodied_skills/resource /ws/src/embodied_skills/resource
+COPY embodied_skills/embodied_skills /ws/src/embodied_skills/embodied_skills
+COPY embodied_executive/CMakeLists.txt embodied_executive/package.xml /ws/src/embodied_executive/
+COPY embodied_executive/src /ws/src/embodied_executive/src
 COPY astra_bringup /ws/src/astra_bringup
 RUN bash -lc '. /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && colcon build --merge-install --packages-select embodied_safety embodied_observation embodied_goals embodied_skills embodied_executive astra_bringup --event-handlers console_direct+'
+COPY astra_moveit_config/test /ws/src/astra_moveit_config/test
+COPY embodied_safety/test /ws/src/embodied_safety/test
+COPY embodied_skills/test /ws/src/embodied_skills/test
+COPY embodied_executive/test /ws/src/embodied_executive/test
 ENV AMENT_PREFIX_PATH=/ws/install:/opt/ros/lyrical
 CMD ["bash", "-lc", ". /opt/ros/lyrical/setup.bash && . /ws/install/setup.bash && export AMENT_PREFIX_PATH=/ws/install:$AMENT_PREFIX_PATH && ros2 launch astra_bringup headless.launch.py"]

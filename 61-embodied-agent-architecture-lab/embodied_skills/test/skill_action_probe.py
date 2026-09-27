@@ -109,7 +109,7 @@ class Probe(Node):
             zero.mission_id = MISSION
             zero.frame_id = "base_link"
             zero.clock_domain = "sim"
-            zero.issued_at = self.get_clock().now().to_msg()
+            zero.issued_at = self.states[-1].observed_at
             zero.ttl_seconds = 0.2
             self.intent.publish(zero)
 
@@ -124,7 +124,11 @@ class Probe(Node):
         goal.requested_by = "local-operator"
         goal.frame_id = "map"
         goal.clock_domain = "sim"
-        goal.requested_at = self.get_clock().now().to_msg()
+        goal.requested_at = (
+            self.states[-1].observed_at
+            if self.states
+            else self.get_clock().now().to_msg()
+        )
         goal.ttl_seconds = 0.8
         self.goals.publish(goal)
 
@@ -144,7 +148,11 @@ class Probe(Node):
         request.target_id = TARGET
         request.frame_id = "map"
         request.clock_domain = "sim"
-        request.requested_at = self.get_clock().now().to_msg()
+        request.requested_at = (
+            self.states[-1].observed_at
+            if self.states
+            else self.get_clock().now().to_msg()
+        )
         request.timeout_seconds = timeout
         accepted = self.action.send_goal_async(request)
         self.until(lambda: accepted.done())
@@ -216,6 +224,8 @@ def main():
         node.arm_for_motion()
         motion_index = len(node.commands)
         passed["align_base"] = node.invoke("align_base", timeout=8.0)
+        # A standalone skill caller must explicitly release the base lease.
+        node.arm.publish(Bool(data=False))
         node.until(lambda: node.states and node.states[-1].mode == "SAFE_IDLE")
         assert any(
             abs(command.angular.z) > 0.02 for command in node.commands[motion_index:]

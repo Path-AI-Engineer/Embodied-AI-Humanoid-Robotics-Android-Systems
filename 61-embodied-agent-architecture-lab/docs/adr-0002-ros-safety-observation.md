@@ -1,6 +1,8 @@
 # ADR 0002 — ROS observation, policy and safety integration
 
-Status: accepted as a simulation integration checkpoint; not a Project 61 release approval.
+Status: historical simulation integration checkpoint; arm-planning details
+superseded by [ADR 0004](adr-0004-moveit-planning-only.md); not a Project 61
+release approval.
 
 Gazebo lidar scans are bridged to ROS 2 with their original timestamps and frames. `lidar_perception` converts a valid front-sector return into a conservative `obstacle/front` percept. It does not assert object identity or use Gazebo model state. A separate `world_model` process checks source, frame, clock, confidence and TTL before publishing a short-lived entity fact and delta. Both observation processes now expose ROS lifecycle transitions and are auto-configured/activated by launch; the smoke deactivates and reactivates the world model. Coordinated rollback of the whole graph on partial startup failure is not yet implemented. The goal gateway accepts a typed allowlisted fixture goal but rejects a restricted-zone approval represented only by an untrusted Boolean.
 

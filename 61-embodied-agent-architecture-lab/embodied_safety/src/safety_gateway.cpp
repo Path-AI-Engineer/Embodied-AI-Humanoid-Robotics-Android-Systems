@@ -51,6 +51,9 @@ class SafetyGateway final : public rclcpp::Node {
               decision->frame_id != "map" || decision->clock_domain != "sim" ||
               decision->mission_id.empty() || age < -0.05 || age > 1.0 ||
               stamp < last_policy_stamp_ns_) return;
+          // An armed mission owns the safety lease. Concurrent policy traffic
+          // for another mission cannot silently replace its authorization.
+          if (mode_ == "ACTIVE" && decision->mission_id != authorized_mission_) return;
           last_policy_stamp_ns_ = stamp;
           if (
               decision->allowed && decision->result_code == "OK" &&
@@ -80,10 +83,15 @@ class SafetyGateway final : public rclcpp::Node {
             publish_state();
             return;
           }
-          if (msg->data && mode_ == "SAFE_IDLE" && scan_fresh() && world_fresh() && policy_fresh()) {
-            mode_ = "ACTIVE";
-            reason_ = "operator_arm";
-            last_intent_wall_ = std::chrono::steady_clock::now();
+          if (msg->data && mode_ == "SAFE_IDLE") {
+            if (!scan_fresh()) reason_ = "arm_rejected_scan_stale";
+            else if (!world_fresh()) reason_ = "arm_rejected_world_stale";
+            else if (!policy_fresh()) reason_ = "arm_rejected_policy_stale";
+            else {
+              mode_ = "ACTIVE";
+              reason_ = "operator_arm";
+              last_intent_wall_ = std::chrono::steady_clock::now();
+            }
             publish_state();
           }
         });
@@ -176,17 +184,26 @@ class SafetyGateway final : public rclcpp::Node {
     }
     const rclcpp::Time issued(intent.issued_at);
     const double age = (now() - issued).seconds();
-    const bool valid = intent.schema_version == "astra.control-intent.v1" &&
+    const bool valid_contract = intent.schema_version == "astra.control-intent.v1" &&
                        intent.frame_id == "base_link" && intent.clock_domain == "sim" &&
                        intent.mission_id == authorized_mission_ && intent.ttl_seconds > 0 && intent.ttl_seconds <= 0.25f &&
-                       age >= -0.05 && age <= intent.ttl_seconds &&
                        std::isfinite(intent.linear_meters_per_second) &&
                        std::isfinite(intent.angular_radians_per_second) &&
                        std::abs(intent.linear_meters_per_second) <= 0.35f &&
                        std::abs(intent.angular_radians_per_second) <= 0.8f &&
                        intent.arm_radians_per_second == 0.0f && front_clearance_ >= 0.8f;
-    if (!valid) {
+    if (!valid_contract) {
+      RCLCPP_WARN(get_logger(), "intent rejected contract mission_match=%d age=%.3f linear=%.3f angular=%.3f",
+                  intent.mission_id == authorized_mission_, age,
+                  intent.linear_meters_per_second, intent.angular_radians_per_second);
       stop("PROTECTIVE_STOP", "invalid_or_unsafe_control_intent", false);
+      return;
+    }
+    if (age < -0.05 || age > intent.ttl_seconds) {
+      publish_zero();
+      if (intent.linear_meters_per_second != 0.0f || intent.angular_radians_per_second != 0.0f) {
+        stop("PROTECTIVE_STOP", "stale_or_future_nonzero_intent", false);
+      }
       return;
     }
     geometry_msgs::msg::Twist command;

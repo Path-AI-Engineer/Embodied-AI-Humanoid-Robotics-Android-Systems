@@ -1,6 +1,6 @@
 {
   "schema_version": "embodied.robotics-profile.v1",
-  "status": "headless-bringup-verified; full-integration-pending",
+  "status": "headless-moveit-bringup-verified; release-gates-pending",
   "architecture": "linux/amd64",
   "operating_system": "Ubuntu 26.04.1 LTS Resolute Raccoon",
   "ros_distro": "lyrical",
@@ -16,10 +16,11 @@
     "ros-lyrical-gz-ros2-control": "3.0.9-1resolute.20260915.105054",
     "ros-lyrical-joint-trajectory-controller": "6.9.0-1resolute.20260915.151614",
     "ros-lyrical-joint-state-broadcaster": "6.9.0-1resolute.20260915.110533",
-    "ros-lyrical-behaviortree-cpp": "4.10.0-1resolute.20260915.080455"
-  },
-  "available_not_integrated": {
-    "ros-lyrical-moveit": "2.15.2-1resolute.20260918.030626"
+    "ros-lyrical-behaviortree-cpp": "4.10.0-1resolute.20260915.080455",
+    "ros-lyrical-moveit-ros-move-group": "2.15.2-1resolute.20260918.020818",
+    "ros-lyrical-moveit-planners-ompl": "2.15.2-1resolute.20260918.020543",
+    "ros-lyrical-moveit-configs-utils": "2.15.2-1resolute.20260918.005455",
+    "ros-lyrical-moveit-kinematics": "2.15.2-1resolute.20260918.020337"
   },
   "package_resolution": "Current Lyrical repository cohort as checked on 2026-09-25; recheck before release",
   "checked_at_utc": "2026-09-25",

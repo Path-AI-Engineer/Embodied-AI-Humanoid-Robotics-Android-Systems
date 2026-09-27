@@ -14,9 +14,12 @@ class LidarPerception(LifecycleNode):
         super().__init__("lidar_perception")
         self.active = False
         sensor_qos = QoSProfile(depth=5, reliability=ReliabilityPolicy.BEST_EFFORT)
-        percept_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.BEST_EFFORT)
+        percept_qos = QoSProfile(depth=8, reliability=ReliabilityPolicy.RELIABLE)
         self.publisher = self.create_lifecycle_publisher(
             Percept, "/astra/perception/percepts", percept_qos
+        )
+        self.world_publisher = self.create_lifecycle_publisher(
+            Percept, "/astra/perception/lidar", percept_qos
         )
         self.subscription = self.create_subscription(
             LaserScan, "/astra/sensors/scan", self.on_scan, sensor_qos
@@ -72,6 +75,7 @@ class LidarPerception(LifecycleNode):
         percept.pose.covariance[7] = 0.04
         percept.result_code = "OK"
         self.publisher.publish(percept)
+        self.world_publisher.publish(percept)
 
 
 def main():
