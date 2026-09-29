@@ -1,6 +1,6 @@
 # Project 61 architecture charter
 
-Status: implementation candidate, not approved release. The synthetic Astra mission is inspect–point–report–return. Hardware motion and claims of certified safety or hard real-time execution are out of scope.
+Status: simulation-lab release candidate. The synthetic Astra mission is inspect–point–report–return. Hardware motion and claims of certified safety or hard real-time execution are out of scope. [ADR 0005](adr-0005-simulation-lab-closure-boundary.md) distinguishes the map's lab acceptance from production-hardening gates that the earlier charter wording conflated.
 
 ## Ownership and trust
 
@@ -24,4 +24,4 @@ The Python harness enforces these boundaries within a cooperative process. It is
 - The ROS/Gazebo image must compile all workspace packages, expand Astra Xacro, validate the world, and complete 12 clean headless bringups without crashed processes. Sensor-to-world, policy, safety and bag event-order probes must pass on each bringup.
 - The production workbench must load local evidence and pass desktop/mobile keyboard and overflow checks.
 
-The profile is Lyrical/Jetty only. If its clean runtime cannot pass, document the exact blocker in an ADR before considering the permitted Jazzy/Harmonic fallback. MoveIt planning-only and BehaviorTree.CPP mission sequencing are integrated into the ROS bringup, but they do not authorize direct arm-controller execution. The frozen test split, 12-run ROS lifecycle/fault campaign, exact rosbag replay, full-graph SROS2 enforcement, and cross-repository contract approval remain distinct closure gates; a passing portable gate does not waive them. Until graph permissions are enforced, the ROS command topic and raw arm-controller action are not protected from an untrusted publisher.
+The profile is Lyrical/Jetty only. If its clean runtime cannot pass, document the exact blocker in an ADR before considering the permitted Jazzy/Harmonic fallback. MoveIt planning-only and BehaviorTree.CPP mission sequencing are integrated into the ROS bringup, but they do not authorize direct arm-controller execution. The frozen test split, 12 clean ROS/Gazebo bringups, functional rosbag sensor replay, SROS2 allow/deny baseline, and reference-only cross-repository contract approval are distinct **lab** gates; a passing portable gate does not waive them. Exact all-message rosbag replay and full-graph SROS2 enforcement are separate **production-hardening** gates per ADR 0005. Until graph permissions are enforced, the ROS command topic and raw arm-controller action are not protected from an untrusted publisher.

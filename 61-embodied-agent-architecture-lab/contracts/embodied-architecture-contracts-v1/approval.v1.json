@@ -1,0 +1,15 @@
+{
+  "schema_version": "embodied.contract-handoff-approval.v1",
+  "candidate_manifest_sha256": "dd4537f358e76144e47daaf8efde8aa44a33bc60ae80a8512210f70968d503ca",
+  "decision": "approved_reference_only",
+  "approved_routes": ["AI Engineer", "Software Engineer"],
+  "authorized_by": "project owner, explicit confirmation in Codex",
+  "authorized_at_utc": "2026-09-29T13:13:04Z",
+  "scope": "versioned data-only reference bundle",
+  "restrictions": [
+    "no runtime code or credential exchange",
+    "no control-topic or action integration",
+    "no direct ingestion into Software Engineer 11 live schemas",
+    "any future adapter requires separate specification, validation, and approval"
+  ]
+}

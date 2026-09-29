@@ -1,4 +1,4 @@
-param([string]$Python = '', [switch]$SkipWeb, [switch]$RequireRos)
+param([string]$Python = '', [switch]$SkipWeb, [switch]$RequireRos, [switch]$RequireFinal)
 
 $ErrorActionPreference = 'Stop'
 $projectRoot = Split-Path -Parent $PSScriptRoot
@@ -28,9 +28,9 @@ try {
     Write-Host '  -> Unit and API tests' -ForegroundColor Cyan
     & $Python -m unittest discover -s tests -v
     Assert-Exit 'Unit and API tests'
-    Write-Host '  -> Data-only handoff candidate checksums' -ForegroundColor Cyan
+    Write-Host '  -> Data-only handoff checksums and approval scope' -ForegroundColor Cyan
     & $Python scripts/verify_contract_handoff.py
-    Assert-Exit 'Contract handoff candidate'
+    Assert-Exit 'Contract handoff'
     if (-not $SkipWeb) {
         Push-Location (Join-Path $projectRoot 'apps\workbench')
         try {
@@ -52,9 +52,18 @@ try {
         & (Join-Path $PSScriptRoot 'security-smoke.ps1')
         Assert-Exit 'SROS2 allow/deny fixture'
     }
+    if ($RequireFinal) {
+        Write-Host '  -> Sealed held-out evaluation' -ForegroundColor Cyan
+        & $Python scripts/verify_final_evaluation.py
+        Assert-Exit 'Final held-out evaluation'
+        Write-Host '  -> Promoted 12-run ROS/Gazebo campaign' -ForegroundColor Cyan
+        & $Python scripts/verify_ros_campaign.py reports/local/ros-bringup-campaign/final.json
+        Assert-Exit 'Final ROS/Gazebo campaign'
+    }
     git -c "safe.directory=$(Split-Path -Parent $projectRoot)" diff --check
     Assert-Exit 'git diff --check'
-    Write-Host 'Project 61 selected local gates passed. Full project closure requires the frozen test and handoff gates.' -ForegroundColor Green
+    $label = if ($RequireFinal) { 'Project 61 local final gates passed. Production-hardening limits remain documented.' } else { 'Project 61 selected local gates passed. Use -RequireFinal to verify frozen evidence.' }
+    Write-Host $label -ForegroundColor Green
 }
 finally {
     Pop-Location

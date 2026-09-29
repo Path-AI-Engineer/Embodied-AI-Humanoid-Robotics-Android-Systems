@@ -17,6 +17,10 @@ TARGET = ROOT / "contracts" / "embodied-architecture-contracts-v1"
 
 
 def main() -> None:
+    if (TARGET / "approval.v1.json").exists():
+        raise SystemExit(
+            "Approved handoff is immutable; archive its approval before a versioned amendment."
+        )
     files = [ROOT / "contracts" / "interface-catalog.v1.json"]
     files += sorted((ROOT / "astra_interfaces" / "msg").glob("*.msg"))
     files += sorted((ROOT / "astra_interfaces" / "action").glob("*.action"))
